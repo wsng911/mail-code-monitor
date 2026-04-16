@@ -1,9 +1,11 @@
 """
 邮箱验证码监控 - 多账号，支持 Gmail(应用密码) + Outlook(OAuth2)
 """
-import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html
+import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html, threading
 from html.parser import HTMLParser
 from email.header import decode_header
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -19,6 +21,12 @@ TG_BOT_TOKEN  = cfg["telegram"]["bot_token"]
 TG_CHAT_ID    = cfg["telegram"]["chat_id"]
 POLL_INTERVAL = cfg.get("poll_interval", 30)
 FORWARD_ALL   = cfg.get("forward_all", False)
+
+# OAuth2 回调服务配置
+OAUTH_ENABLED     = cfg.get("oauth", {}).get("enabled", False)
+OAUTH_CLIENT_ID   = cfg.get("oauth", {}).get("client_id", OUTLOOK_DEFAULT_CLIENT_ID if "OUTLOOK_DEFAULT_CLIENT_ID" in dir() else "7feada80-d946-4d06-b134-73afa3524fb7")
+OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://mail.idays.gq/api/emails/oauth/outlook/callback")
+OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
 CODE_RE = re.compile(r'\b\d{6}\b')
 
@@ -244,8 +252,105 @@ def _outlook_imap(acc: dict, token: str, label: str) -> list[dict]:
         log.error(f"[Outlook IMAP:{acc['email']}] {e}")
     return results
 
+# ── OAuth2 回调服务 ───────────────────────────────────────────────────────────
+AUTH_URL = (
+    f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+    f"?client_id={{client_id}}&response_type=code&redirect_uri={{redirect}}"
+    f"&scope=https://graph.microsoft.com/Mail.Read%20offline_access&prompt=consent"
+)
+
+class OAuthHandler(BaseHTTPRequestHandler):
+    def log_message(self, *args): pass  # 静默 HTTP 日志
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+
+        # 授权入口：跳转微软登录
+        if parsed.path == "/auth/outlook":
+            url = AUTH_URL.format(client_id=OAUTH_CLIENT_ID, redirect=OAUTH_REDIRECT)
+            self._redirect(url)
+
+        # 微软回调
+        elif parsed.path == "/api/emails/oauth/outlook/callback":
+            params = parse_qs(parsed.query)
+            code = params.get("code", [None])[0]
+            if not code:
+                self._respond(400, "缺少 code 参数")
+                return
+            try:
+                rt = _exchange_code(code)
+                _save_outlook_account(rt)
+                self._respond(200, "✅ 授权成功！账号已添加，监控将在下一轮询周期生效。")
+                send_tg(f"✅ 新 Outlook 账号已授权完成")
+                log.info("新 Outlook 账号授权成功，已写入 config.yaml")
+            except Exception as e:
+                self._respond(500, f"授权失败: {e}")
+                log.error(f"OAuth 回调处理失败: {e}")
+        else:
+            self._respond(404, "Not Found")
+
+    def _redirect(self, url):
+        self.send_response(302)
+        self.send_header("Location", url)
+        self.end_headers()
+
+    def _respond(self, code, msg):
+        body = msg.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def _exchange_code(code: str) -> str:
+    r = httpx.post(OUTLOOK_TOKEN_URL, data={
+        "client_id":    OAUTH_CLIENT_ID,
+        "grant_type":   "authorization_code",
+        "code":         code,
+        "redirect_uri": OAUTH_REDIRECT,
+        "scope":        "https://graph.microsoft.com/Mail.Read offline_access",
+    }, timeout=15)
+    d = r.json()
+    if "refresh_token" not in d:
+        raise RuntimeError(d.get("error_description", d))
+    return d["refresh_token"]
+
+
+def _save_outlook_account(refresh_token: str):
+    """将新账号追加写入 config.yaml"""
+    with open(CONFIG_FILE) as f:
+        raw = f.read()
+    data = yaml.safe_load(raw)
+
+    new_mb = {"email": "", "refresh_token": refresh_token, "client_id": OAUTH_CLIENT_ID}
+
+    # 找到 outlook type 块追加，没有则新建
+    accounts = data.get("accounts", [])
+    for entry in accounts:
+        if entry.get("type") == "outlook":
+            entry.setdefault("mailboxes", []).append(new_mb)
+            break
+    else:
+        accounts.append({"type": "outlook", "mailboxes": [new_mb]})
+    data["accounts"] = accounts
+
+    with open(CONFIG_FILE, "w") as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+
+
+def start_oauth_server():
+    server = HTTPServer(("0.0.0.0", OAUTH_PORT), OAuthHandler)
+    log.info(f"OAuth 回调服务已启动，授权入口: http://0.0.0.0:{OAUTH_PORT}/auth/outlook")
+    server.serve_forever()
+
+
 # ── 主循环 ────────────────────────────────────────────────────────────────────
 def main():
+    if OAUTH_ENABLED:
+        t = threading.Thread(target=start_oauth_server, daemon=True)
+        t.start()
+
     # 支持新格式（按 type 分组）和旧格式（flat list）
     raw = cfg.get("accounts", [])
     accounts = []

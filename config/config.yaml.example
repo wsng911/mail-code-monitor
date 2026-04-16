@@ -5,6 +5,13 @@ telegram:
 poll_interval: 30       # 轮询间隔（秒）
 forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
 
+# OAuth2 回调服务（用于 Outlook 一键授权）
+oauth:
+  enabled: true
+  client_id: "your_azure_client_id"
+  redirect_uri: "https://mail.idays.gq/api/emails/oauth/outlook/callback"
+  port: 8080
+
 accounts:
   - type: gmail
     mailboxes:

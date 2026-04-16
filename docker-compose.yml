@@ -1,6 +1,9 @@
 services:
   mail-monitor:
-    image: wsng911/mail-code-monitor:latest
+    image: wsng911/mail-code-monitor:Mail-code-to-TG
+    container_name: mail-monitor
     restart: unless-stopped
+    ports:
+      - "8080:8080"
     volumes:
       - ./config:/config
