@@ -155,7 +155,7 @@ def poll_qq(acc: dict) -> list[dict]:
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
 
 def _outlook_refresh(acc: dict) -> dict:
-    client_id = acc.get("client_id") or OUTLOOK_DEFAULT_CLIENT_ID
+    client_id = acc.get("client_id") or OAUTH_CLIENT_ID or OUTLOOK_DEFAULT_CLIENT_ID
     for scope in [
         "https://graph.microsoft.com/.default offline_access",
         "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
@@ -279,11 +279,11 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 self._respond(400, "缺少 code 参数")
                 return
             try:
-                rt = _exchange_code(code)
-                _save_outlook_account(rt)
-                self._respond(200, "✅ 授权成功！账号已添加，监控将在下一轮询周期生效。")
-                send_tg(f"✅ 新 Outlook 账号已授权完成")
-                log.info("新 Outlook 账号授权成功，已写入 config.yaml")
+                rt, email = _exchange_code(code)
+                _save_outlook_account(rt, email)
+                self._respond(200, f"✅ 授权成功！{email} 已添加，监控将在下一轮询周期生效。")
+                send_tg(f"✅ Outlook 账号已授权：`{email}`")
+                log.info(f"新 Outlook 账号授权成功：{email}")
             except Exception as e:
                 self._respond(500, f"授权失败: {e}")
                 log.error(f"OAuth 回调处理失败: {e}")
@@ -304,7 +304,8 @@ class OAuthHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def _exchange_code(code: str) -> str:
+def _exchange_code(code: str) -> tuple[str, str]:
+    """返回 (refresh_token, email)"""
     data = {
         "client_id":    OAUTH_CLIENT_ID,
         "grant_type":   "authorization_code",
@@ -320,39 +321,43 @@ def _exchange_code(code: str) -> str:
     d = r.json()
     if "refresh_token" not in d:
         raise RuntimeError(d.get("error_description", d))
-    return d["refresh_token"]
+    # 用 access_token 获取邮箱地址
+    email = ""
+    try:
+        me = httpx.get("https://graph.microsoft.com/v1.0/me",
+                       headers={"Authorization": f"Bearer {d['access_token']}"},
+                       params={"$select": "mail,userPrincipalName"}, timeout=10)
+        me_data = me.json()
+        email = me_data.get("mail") or me_data.get("userPrincipalName", "")
+    except Exception:
+        pass
+    return d["refresh_token"], email
 
 
-def _save_outlook_account(refresh_token: str):
-    """将新 Outlook 账号追加到 config.yaml 末尾"""
-    new_entry = (
-        f"\n  - client_id: {OAUTH_CLIENT_ID}\n"
-        f"    email: ''\n"
-        f"    refresh_token: '{refresh_token}'\n"
-    )
+def _save_outlook_account(refresh_token: str, email: str):
+    """将新 Outlook 账号追加到 config.yaml，保持原有格式"""
     with open(CONFIG_FILE) as f:
         content = f.read()
 
-    # 找到 outlook type 块追加，没有则新建
+    new_entry = (
+        f"      - label: {email or 'outlook'}\n"
+        f"        email: \"{email}\"\n"
+        f"        refresh_token: \"{refresh_token}\"\n"
+    )
+
     if "type: outlook" in content:
-        # 在最后一个 outlook mailboxes 列表末尾追加
-        insert_marker = "  type: outlook"
-        idx = content.rfind(insert_marker)
+        # 在已有 outlook mailboxes 末尾追加
+        idx = content.rfind("type: outlook")
         insert_pos = content.rfind("\n", 0, idx)
-        content = content[:insert_pos] + new_entry + content[insert_pos:]
+        content = content[:insert_pos] + "\n" + new_entry + content[insert_pos:]
     else:
-        # 在 accounts 末尾新增 outlook 块
+        # 新增 outlook 块
         outlook_block = (
-            f"- mailboxes:\n"
-            f"  - client_id: {OAUTH_CLIENT_ID}\n"
-            f"    email: ''\n"
-            f"    refresh_token: '{refresh_token}'\n"
-            f"  type: outlook\n"
+            f"  - type: outlook\n"
+            f"    mailboxes:\n"
+            f"{new_entry}"
         )
-        if "accounts:" in content:
-            content = content.rstrip() + "\n" + outlook_block
-        else:
-            content += f"\naccounts:\n{outlook_block}"
+        content = content.rstrip() + "\n" + outlook_block + "\n"
 
     with open(CONFIG_FILE, "w") as f:
         f.write(content)
