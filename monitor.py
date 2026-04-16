@@ -460,7 +460,7 @@ def main():
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
                 send_tg(text)
                 if FORWARD_ALL and is_html and body_raw:
-                    send_tg_document(text, f"{item['subject'][:40]}.html", body_raw)
+                    send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", body_raw)
             else:
                 caption = (f"📩 *{item['label']}*\n"
                            f"发件人: {item['from']}\n"
