@@ -2,24 +2,28 @@ telegram:
   bot_token: "your_bot_token_here"
   chat_id: "your_chat_id_here"
 
-poll_interval: 30
-
-# true = 转发所有邮件（含 HTML 附件）；false = 只推验证码
-forward_all: false
+poll_interval: 30       # 轮询间隔（秒）
+forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
 
 accounts:
   - type: gmail
-    label: 我的Gmail
-    email: you@gmail.com
-    app_pass: "xxxx xxxx xxxx xxxx"
+    mailboxes:
+      - label: 我的Gmail
+        email: you@gmail.com
+        app_pass: "xxxx xxxx xxxx xxxx"
+      - label: 备用Gmail
+        email: backup@gmail.com
+        app_pass: "xxxx xxxx xxxx xxxx"
 
   - type: qq
-    label: 我的QQ邮箱
-    email: 123456@qq.com
-    app_pass: "xxxxxxxxxxxxxxxx"
+    mailboxes:
+      - label: 我的QQ邮箱
+        email: 123456@qq.com
+        app_pass: "xxxxxxxxxxxxxxxx"
 
   - type: outlook
-    label: 我的Outlook
-    email: you@hotmail.com
-    refresh_token: "0.AXXX..."
-    client_id: ""
+    mailboxes:
+      - label: 我的Outlook
+        email: you@hotmail.com
+        refresh_token: "0.AXXX..."
+        client_id: ""

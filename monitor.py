@@ -246,7 +246,15 @@ def _outlook_imap(acc: dict, token: str, label: str) -> list[dict]:
 
 # ── 主循环 ────────────────────────────────────────────────────────────────────
 def main():
-    accounts = cfg.get("accounts", [])
+    # 支持新格式（按 type 分组）和旧格式（flat list）
+    raw = cfg.get("accounts", [])
+    accounts = []
+    for entry in raw:
+        if "mailboxes" in entry:
+            for mb in entry["mailboxes"]:
+                accounts.append({**mb, "type": entry["type"]})
+        else:
+            accounts.append(entry)
     log.info(f"加载 {len(accounts)} 个账号")
     email_list = "\n".join(
         f"`{acc['email']}`" for acc in accounts if acc.get("email")
