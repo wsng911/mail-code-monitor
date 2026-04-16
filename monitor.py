@@ -6,6 +6,9 @@ from html.parser import HTMLParser
 from email.header import decode_header
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -98,10 +101,15 @@ def send_tg_document(caption: str, filename: str, content: str):
 
 # ── 工具 ──────────────────────────────────────────────────────────────────────
 def extract_imap_body(msg) -> str:
+    plain = html_body = None
     if msg.is_multipart():
         for part in msg.walk():
-            if part.get_content_type() == "text/plain":
-                return part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
+            ct = part.get_content_type()
+            if ct == "text/plain" and plain is None:
+                plain = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
+            elif ct == "text/html" and html_body is None:
+                html_body = part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8", errors="replace")
+        return plain or html_body or ""
     payload = msg.get_payload(decode=True)
     return payload.decode(msg.get_content_charset() or "utf-8", errors="replace") if payload else ""
 
@@ -127,9 +135,7 @@ def extract_to_email(msg) -> str:
     return m.group(0) if m else ""
 
 def parse_date(msg) -> str:
-    from email.utils import parsedate_to_datetime
     try:
-        from datetime import timezone
         dt = parsedate_to_datetime(msg.get("Date", ""))
         return dt.astimezone().strftime("%Y-%m-%d %H:%M")
     except Exception:
@@ -236,7 +242,6 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
         body    = msg.get("body", {}).get("content", "")
         raw_dt  = msg.get("receivedDateTime", "")
         try:
-            from datetime import datetime, timezone
             date = datetime.fromisoformat(raw_dt.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
         except Exception:
             date = raw_dt[:16]
@@ -421,20 +426,20 @@ def main():
 
     first_run = True
     while True:
-        def poll_one(acc):
+        _skip = first_run
+        def poll_one(acc, skip=_skip):
             t = acc.get("type", "").lower()
             try:
                 if t == "gmail":
-                    return poll_gmail(acc, skip_existing=first_run)
+                    return poll_gmail(acc, skip_existing=skip)
                 elif t == "qq":
-                    return poll_qq(acc, skip_existing=first_run)
+                    return poll_qq(acc, skip_existing=skip)
                 elif t == "outlook":
-                    return poll_outlook(acc, skip_existing=first_run)
+                    return poll_outlook(acc, skip_existing=skip)
             except Exception as e:
                 log.error(f"[{acc.get('email')}] {e}")
             return []
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
         all_items = []
         with ThreadPoolExecutor(max_workers=min(len(accounts), 10)) as ex:
             futures = {ex.submit(poll_one, acc): acc for acc in accounts}
