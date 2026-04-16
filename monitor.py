@@ -181,6 +181,7 @@ def poll_qq(acc: dict, skip_existing: bool = False) -> list[dict]:
 
 # ── Outlook（OAuth2，Graph + IMAP fallback）──────────────────────────────────
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
+_token_fail_alerted: set[str] = set()  # 已推送过失效通知的账号
 
 def _outlook_refresh(acc: dict) -> dict:
     client_id = acc.get("client_id") or OAUTH_CLIENT_ID or OUTLOOK_DEFAULT_CLIENT_ID
@@ -215,15 +216,20 @@ def _outlook_get_token(acc: dict) -> tuple[str, str]:
 def poll_outlook(acc: dict, skip_existing: bool = False) -> list[dict]:
     """acc: {email, refresh_token, client_id(可选), label(可选)}"""
     results = []
+    email = acc["email"]
     try:
         token, token_type = _outlook_get_token(acc)
-        label = acc.get("label", acc["email"])
+        _token_fail_alerted.discard(email)  # 恢复正常时清除记录
+        label = acc.get("label", email)
         if token_type == "imap":
             results = _outlook_imap(acc, token, label, skip_existing=skip_existing)
         else:
             results = _outlook_graph(acc, token, label, skip_existing=skip_existing)
     except Exception as e:
-        log.error(f"[Outlook:{acc['email']}] {e}")
+        log.error(f"[Outlook:{email}] {e}")
+        if email not in _token_fail_alerted:
+            _token_fail_alerted.add(email)
+            send_tg(f"⚠️ Outlook 账号失效：`{email}`\n请重新授权：https://oa.idays.gq/auth/outlook")
     return results
 
 def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
