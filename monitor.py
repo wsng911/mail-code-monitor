@@ -119,10 +119,19 @@ def decode_from(msg) -> str:
             result.append(raw or "")
     return "".join(result)
 
+def extract_to_email(msg) -> str:
+    """提取实际收件地址（支持 +tag 别名）"""
+    import re
+    to = msg.get("Delivered-To") or msg.get("To", "")
+    m = re.search(r'[\w.+%-]+@[\w.-]+', to)
+    return m.group(0) if m else ""
+
 def parse_date(msg) -> str:
     from email.utils import parsedate_to_datetime
     try:
-        return parsedate_to_datetime(msg.get("Date", "")).strftime("%Y-%m-%d %H:%M")
+        from datetime import timezone
+        dt = parsedate_to_datetime(msg.get("Date", ""))
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M")
     except Exception:
         return ""
 
@@ -146,8 +155,9 @@ def _poll_imap(acc: dict, host: str, skip_existing: bool = False) -> list[dict]:
             if skip_existing:
                 imap.store(uid, "+FLAGS", "\\Seen")
                 continue
+            to_addr = extract_to_email(msg) or acc.get("label", acc["email"])
             if code or FORWARD_ALL:
-                results.append({"label": acc.get("label", acc["email"]), "subject": subject,
+                results.append({"label": to_addr, "subject": subject,
                                  "from": decode_from(msg), "code": code, "body": body, "date": date})
             imap.store(uid, "+FLAGS", "\\Seen")
         imap.logout()

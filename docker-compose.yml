@@ -3,6 +3,8 @@ services:
     image: wsng911/mail-code-monitor:Mail-code-to-TG
     container_name: mail-monitor
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
     ports:
       - "8080:8080"
     volumes:
