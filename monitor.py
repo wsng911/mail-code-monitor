@@ -421,56 +421,58 @@ def main():
 
     first_run = True
     while True:
-        for acc in accounts:
+        def poll_one(acc):
             t = acc.get("type", "").lower()
             try:
                 if t == "gmail":
-                    items = poll_gmail(acc, skip_existing=first_run)
+                    return poll_gmail(acc, skip_existing=first_run)
                 elif t == "qq":
-                    items = poll_qq(acc, skip_existing=first_run)
+                    return poll_qq(acc, skip_existing=first_run)
                 elif t == "outlook":
-                    items = poll_outlook(acc, skip_existing=first_run)
-                else:
-                    log.warning(f"未知账号类型: {t}")
-                    continue
-                for item in items:
-                    body_raw = item.get("body", "")
-                    plain = html_to_text(body_raw)
-                    is_html = "<" in body_raw and ">" in body_raw
-
-                    if item.get("code"):
-                        text = (f"`{item['code']}`\n\n"
-                                f"📬 *{item['label']}*\n"
-                                f"发件人: {item['from']}\n"
-                                f"时间: {item.get('date', '')}\n"
-                                f"主题: {item['subject']}")
-                        log.info(f"[{item['label']}] 验证码: {item['code']}")
-                        send_tg(text)
-                        # forward_all 时始终发完整 HTML 附件
-                        if FORWARD_ALL and is_html and body_raw:
-                            send_tg_document(text, f"{item['subject'][:40]}.html", body_raw)
-                    else:
-                        # forward_all 普通邮件
-                        caption = (f"📩 *{item['label']}*\n"
-                                   f"发件人: {item['from']}\n"
-                                   f"时间: {item.get('date', '')}\n"
-                                   f"主题: {item['subject']}")
-                        log.info(f"[{item['label']}] 转发邮件: {item['subject']}")
-                        if plain and len(plain) >= 50:
-                            # 有足够文字：推文字，文字超长时额外附 HTML
-                            text = caption + f"\n\n{plain[:1500]}"
-                            if len(plain) > 1500:
-                                text += "\n…（内容已截断）"
-                            send_tg(text)
-                            if is_html and len(plain) > 1500:
-                                send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
-                        else:
-                            # 文字太少（图片为主）：推说明 + 发 HTML 附件
-                            send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
-                            if is_html and body_raw:
-                                send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
+                    return poll_outlook(acc, skip_existing=first_run)
             except Exception as e:
-                log.error(f"账号 {acc.get('email')} 轮询异常: {e}")
+                log.error(f"[{acc.get('email')}] {e}")
+            return []
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        all_items = []
+        with ThreadPoolExecutor(max_workers=min(len(accounts), 10)) as ex:
+            futures = {ex.submit(poll_one, acc): acc for acc in accounts}
+            for f in as_completed(futures):
+                all_items.extend(f.result() or [])
+
+        for item in all_items:
+            body_raw = item.get("body", "")
+            plain = html_to_text(body_raw)
+            is_html = "<" in body_raw and ">" in body_raw
+
+            if item.get("code"):
+                text = (f"`{item['code']}`\n\n"
+                        f"📬 *{item['label']}*\n"
+                        f"发件人: {item['from']}\n"
+                        f"时间: {item.get('date', '')}\n"
+                        f"主题: {item['subject']}")
+                log.info(f"[{item['label']}] 验证码: {item['code']}")
+                send_tg(text)
+                if FORWARD_ALL and is_html and body_raw:
+                    send_tg_document(text, f"{item['subject'][:40]}.html", body_raw)
+            else:
+                caption = (f"📩 *{item['label']}*\n"
+                           f"发件人: {item['from']}\n"
+                           f"时间: {item.get('date', '')}\n"
+                           f"主题: {item['subject']}")
+                log.info(f"[{item['label']}] 转发邮件: {item['subject']}")
+                if plain and len(plain) >= 50:
+                    text = caption + f"\n\n{plain[:1500]}"
+                    if len(plain) > 1500:
+                        text += "\n…（内容已截断）"
+                    send_tg(text)
+                    if is_html and len(plain) > 1500:
+                        send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
+                else:
+                    send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
+                    if is_html and body_raw:
+                        send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
         first_run = False
         time.sleep(POLL_INTERVAL)
 
