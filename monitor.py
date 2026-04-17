@@ -585,7 +585,6 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 _gmail_watch(email)
                 self._respond(200, f"✅ Gmail 授权成功！{email} 已启用 Push 监控。")
                 send_tg(f"✅ Gmail Push 已启用：`{email}`")
-                log.info(f"Gmail Push 授权成功：{email}")
             except Exception as e:
                 self._respond(500, f"授权失败: {e}")
                 log.error(f"Gmail OAuth 回调失败: {e}")
@@ -687,17 +686,21 @@ def _save_outlook_account(refresh_token: str, email: str):
 
 
 def _save_gmail_token(email: str, refresh_token: str):
-    """保存 Gmail refresh_token 到 config.yaml"""
+    """保存 Gmail refresh_token 到 config.yaml，不破坏原有格式"""
     with open(CONFIG_FILE) as f:
         content = f.read()
-    data = yaml.safe_load(content)
-    for entry in data.get("accounts", []):
-        if entry.get("type") == "gmail":
-            for mb in (entry.get("mailboxes") or []):
-                if mb.get("email") == email:
-                    mb["gmail_refresh_token"] = refresh_token
+    # 已有则替换
+    pattern = rf'(email:\s*["\']?{re.escape(email)}["\']?\s*\n(?:\s+\w[^\n]*\n)*?\s+gmail_refresh_token:\s*)[^\n]+'
+    new_content = re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
+    if new_content != content:
+        with open(CONFIG_FILE, "w") as f:
+            f.write(new_content)
+        return
+    # 不存在则在该邮箱行后追加
+    pattern2 = rf'(email:\s*["\']?{re.escape(email)}["\']?)'
+    new_content = re.sub(pattern2, rf'\g<1>\n        gmail_refresh_token: "{refresh_token}"', content, count=1)
     with open(CONFIG_FILE, "w") as f:
-        yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+        f.write(new_content)
 
 
 def start_oauth_server():
