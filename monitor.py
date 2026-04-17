@@ -459,11 +459,13 @@ def _process_gmail_push(data: dict):
             return
 
         token = _gmail_refresh_token(email)
+        # historyId 减1确保包含该条记录
+        start_id = max(1, int(history_id) - 1)
         # 获取新邮件列表
         r = httpx.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/history",
             headers={"Authorization": f"Bearer {token}"},
-            params={"startHistoryId": history_id, "historyTypes": "messageAdded", "labelId": "INBOX"},
+            params={"startHistoryId": start_id, "historyTypes": "messageAdded", "labelId": "INBOX"},
             timeout=10
         )
         if r.status_code != 200:
