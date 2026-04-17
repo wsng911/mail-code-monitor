@@ -566,9 +566,9 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 if "refresh_token" not in d:
                     raise RuntimeError(d.get("error_description", d))
                 # 获取邮箱地址
-                me = httpx.get("https://www.googleapis.com/oauth2/v2/userinfo",
+                me = httpx.get("https://www.googleapis.com/gmail/v1/users/me/profile",
                                headers={"Authorization": f"Bearer {d['access_token']}"}, timeout=10)
-                email = me.json().get("email", "")
+                email = me.json().get("emailAddress", "")
                 # 找到对应账号的 label
                 label = email
                 for acc in cfg.get("accounts", []):
