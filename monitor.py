@@ -458,7 +458,7 @@ def main():
     accounts = []
     for entry in raw:
         if "mailboxes" in entry:
-            for mb in entry["mailboxes"]:
+            for mb in (entry["mailboxes"] or []):
                 accounts.append({**mb, "type": entry["type"]})
         else:
             accounts.append(entry)
