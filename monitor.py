@@ -459,50 +459,47 @@ def _process_gmail_push(data: dict):
             return
 
         token = _gmail_refresh_token(email)
-        # historyId 减1确保包含该条记录
-        start_id = max(1, int(history_id) - 1)
-        # 获取新邮件列表
+        # 直接查未读邮件，不依赖 historyId
         r = httpx.get(
-            f"https://gmail.googleapis.com/gmail/v1/users/me/history",
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages",
             headers={"Authorization": f"Bearer {token}"},
-            params={"startHistoryId": start_id, "historyTypes": "messageAdded", "labelId": "INBOX"},
+            params={"q": "is:unread in:inbox", "maxResults": 10},
             timeout=10
         )
         if r.status_code != 200:
             return
-        history_data = r.json()
-        log.info(f"[Gmail Push] {email} history records: {len(history_data.get('history', []))}")
-        for record in history_data.get("history", []):
-            for added in record.get("messagesAdded", []):
-                msg_id = added["message"]["id"]
-                if msg_id in _processed_msg_ids:
-                    continue
-                _processed_msg_ids.add(msg_id)
-                item = _gmail_fetch_message(email, msg_id)
-                if not item:
-                    continue
-                body = item["body"]
-                code = find_code(body) or find_code(item["subject"])
-                label = _gmail_tokens.get(email, {}).get("label", email)
-                html_body = item.get("html_body", "")
-                if code or FORWARD_ALL:
-                    plain = html_to_text(body)
-                    if code:
-                        text = (f"`{code}`\n\n📬 *{label}*\n"
-                                f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
-                        log.info(f"[Gmail Push:{label}] 验证码: {code}")
-                        send_tg(text)
-                        if FORWARD_ALL and html_body:
-                            send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", html_body)
-                    elif FORWARD_ALL:
-                        caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
-                                   f"时间: {item['date']}\n主题: {item['subject']}")
-                        if plain and len(plain) >= 50:
-                            send_tg(caption + f"\n\n{plain[:1500]}")
-                        else:
-                            send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
-                        if html_body:
-                            send_tg_document(caption, f"{item['subject'][:40]}.html", html_body)
+        messages = r.json().get("messages", [])
+        log.info(f"[Gmail Push] {email} unread messages: {len(messages)}")
+        for msg_info in messages:
+            msg_id = msg_info["id"]
+            if msg_id in _processed_msg_ids:
+                continue
+            _processed_msg_ids.add(msg_id)
+            item = _gmail_fetch_message(email, msg_id)
+            if not item:
+                continue
+            body = item["body"]
+            code = find_code(body) or find_code(item["subject"])
+            label = _gmail_tokens.get(email, {}).get("label", email)
+            html_body = item.get("html_body", "")
+            if code or FORWARD_ALL:
+                plain = html_to_text(body)
+                if code:
+                    text = (f"`{code}`\n\n📬 *{label}*\n"
+                            f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
+                    log.info(f"[Gmail Push:{label}] 验证码: {code}")
+                    send_tg(text)
+                    if FORWARD_ALL and html_body:
+                        send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", html_body)
+                elif FORWARD_ALL:
+                    caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
+                               f"时间: {item['date']}\n主题: {item['subject']}")
+                    if plain and len(plain) >= 50:
+                        send_tg(caption + f"\n\n{plain[:1500]}")
+                    else:
+                        send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
+                    if html_body:
+                        send_tg_document(caption, f"{item['subject'][:40]}.html", html_body)
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
 
