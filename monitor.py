@@ -688,19 +688,29 @@ def _save_outlook_account(refresh_token: str, email: str):
 def _save_gmail_token(email: str, refresh_token: str):
     """保存 Gmail refresh_token 到 config.yaml，不破坏原有格式"""
     with open(CONFIG_FILE) as f:
-        content = f.read()
-    # 已有则替换
-    pattern = rf'(email:\s*["\']?{re.escape(email)}["\']?\s*\n(?:\s+\w[^\n]*\n)*?\s+gmail_refresh_token:\s*)[^\n]+'
-    new_content = re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
-    if new_content != content:
-        with open(CONFIG_FILE, "w") as f:
-            f.write(new_content)
-        return
-    # 不存在则在该邮箱行后追加
-    pattern2 = rf'(email:\s*["\']?{re.escape(email)}["\']?)'
-    new_content = re.sub(pattern2, rf'\g<1>\n        gmail_refresh_token: "{refresh_token}"', content, count=1)
+        lines = f.readlines()
+
+    new_lines = []
+    i = 0
+    inserted = False
+    while i < len(lines):
+        line = lines[i]
+        new_lines.append(line)
+        # 找到匹配的 email 行
+        if not inserted and re.search(rf'email:\s*["\']?{re.escape(email)}["\']?\s*$', line.rstrip()):
+            indent = len(line) - len(line.lstrip())
+            spaces = " " * indent
+            # 检查下一行是否已有 gmail_refresh_token
+            if i + 1 < len(lines) and "gmail_refresh_token:" in lines[i + 1]:
+                i += 1  # 跳过旧的 token 行
+                new_lines.append(f'{spaces}gmail_refresh_token: "{refresh_token}"\n')
+            else:
+                new_lines.append(f'{spaces}gmail_refresh_token: "{refresh_token}"\n')
+            inserted = True
+        i += 1
+
     with open(CONFIG_FILE, "w") as f:
-        f.write(new_content)
+        f.writelines(new_lines)
 
 
 def start_oauth_server():
