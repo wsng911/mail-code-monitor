@@ -32,7 +32,7 @@ OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")
 OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.gq/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
 
-CODE_RE = re.compile(r'\b\d{6}\b')
+STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 
 def find_code(text: str) -> str | None:
     for m in CODE_RE.finditer(text or ""):
@@ -273,8 +273,15 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
         raw_dt  = msg.get("receivedDateTime", "")
         try:
             date = datetime.fromisoformat(raw_dt.replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%d %H:%M")
+            received_dt = datetime.fromisoformat(raw_dt.replace("Z", "+00:00"))
         except Exception:
             date = raw_dt[:16]
+            received_dt = None
+        # 跳过启动前的历史邮件
+        if received_dt and received_dt < STARTUP_TIME:
+            httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
+                        json={"isRead": True}, headers=headers, timeout=10)
+            continue
         code    = find_code(body) or find_code(subject)
         if not skip_existing and (code or FORWARD_ALL):
             results.append({"label": label, "subject": subject, "from": sender, "code": code, "body": body, "date": date})
