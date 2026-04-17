@@ -783,6 +783,9 @@ def main():
             t = acc.get("type", "").lower()
             try:
                 if t == "gmail":
+                    # 已启用 Push 的账号跳过 IMAP 轮询
+                    if acc.get("gmail_refresh_token") and GMAIL_PUSH_ENABLED:
+                        return []
                     return poll_gmail(acc, skip_existing=skip)
                 elif t == "qq":
                     return poll_qq(acc, skip_existing=skip)
