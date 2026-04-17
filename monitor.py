@@ -612,6 +612,10 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 self._respond(500, f"授权失败: {e}")
                 log.error(f"Gmail OAuth 回调失败: {e}")
 
+        # Google Search Console 域名验证
+        elif parsed.path == "/google883877c5c8e86eea.html":
+            self._respond(200, "google-site-verification: google883877c5c8e86eea.html")
+
         else:
             self._respond(404, "Not Found")
 
