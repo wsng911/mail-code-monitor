@@ -462,6 +462,12 @@ def main():
                 accounts.append({**mb, "type": entry["type"]})
         else:
             accounts.append(entry)
+
+    # 去重：同邮箱保留最后一条
+    seen = {}
+    for acc in accounts:
+        seen[acc.get("email", "")] = acc
+    accounts = list(seen.values())
     log.info(f"加载 {len(accounts)} 个账号")
 
     def _group(t):
