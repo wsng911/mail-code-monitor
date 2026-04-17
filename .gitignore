@@ -3,3 +3,9 @@ config/accounts.json
 .env
 __pycache__/
 *.pyc
+tg/
+tg.zip
+._tg.zip
+tg/
+tg.zip
+._tg.zip

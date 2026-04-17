@@ -594,6 +594,7 @@ class OAuthHandler(BaseHTTPRequestHandler):
             content_length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(content_length)
             self._respond(200, "ok")
+            log.info(f"[Gmail Push] 收到推送: {body[:200]}")
             try:
                 data = json.loads(body)
                 threading.Thread(target=_process_gmail_push, args=(data,), daemon=True).start()
