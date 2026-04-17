@@ -519,6 +519,21 @@ AUTH_URL = (
 class OAuthHandler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass  # 静默 HTTP 日志
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/gmail/push":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            self._respond(200, "ok")
+            log.info(f"[Gmail Push] 收到推送: {body[:200]}")
+            try:
+                data = json.loads(body)
+                threading.Thread(target=_process_gmail_push, args=(data,), daemon=True).start()
+            except Exception as e:
+                log.error(f"[Gmail Push] 解析推送失败: {e}")
+        else:
+            self._respond(404, "Not Found")
+
     def do_GET(self):
         parsed = urlparse(self.path)
 
@@ -597,17 +612,6 @@ class OAuthHandler(BaseHTTPRequestHandler):
                 self._respond(500, f"授权失败: {e}")
                 log.error(f"Gmail OAuth 回调失败: {e}")
 
-        # Gmail Pub/Sub Push 接收
-        elif parsed.path == "/api/gmail/push":
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length)
-            self._respond(200, "ok")
-            log.info(f"[Gmail Push] 收到推送: {body[:200]}")
-            try:
-                data = json.loads(body)
-                threading.Thread(target=_process_gmail_push, args=(data,), daemon=True).start()
-            except Exception as e:
-                log.error(f"[Gmail Push] 解析推送失败: {e}")
         else:
             self._respond(404, "Not Found")
 
