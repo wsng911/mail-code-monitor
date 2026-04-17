@@ -204,6 +204,7 @@ def poll_qq(acc: dict, skip_existing: bool = False) -> list[dict]:
 # ── Outlook（OAuth2，Graph + IMAP fallback）──────────────────────────────────
 _outlook_tokens: dict[str, dict] = {}  # email -> {access_token, expiry, token_type}
 _token_fail_alerted: set[str] = set()  # 已推送过失效通知的账号
+_processed_msg_ids: set[str] = set()  # 已处理的 Graph message id
 
 def _outlook_refresh(acc: dict) -> dict:
     client_id = acc.get("client_id") or OAUTH_CLIENT_ID or OUTLOOK_DEFAULT_CLIENT_ID
@@ -268,6 +269,9 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
         log.error(f"[Outlook Graph:{acc['email']}] {r.status_code} {r.text[:200]}")
         return results
     for msg in r.json().get("value", []):
+        msg_id = msg.get("id", "")
+        if msg_id in _processed_msg_ids:
+            continue
         subject = msg.get("subject", "")
         sender  = msg.get("from", {}).get("emailAddress", {}).get("address", "")
         body    = msg.get("body", {}).get("content", "")
@@ -286,8 +290,12 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
         code    = find_code(body) or find_code(subject)
         if not skip_existing and (code or FORWARD_ALL):
             results.append({"label": label, "subject": subject, "from": sender, "code": code, "body": body, "date": date})
-        httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
-                    json={"isRead": True}, headers=headers, timeout=10)
+        try:
+            httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
+                        json={"isRead": True}, headers=headers, timeout=3)
+        except Exception:
+            pass
+        _processed_msg_ids.add(msg_id)
     return results
 
 def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False) -> list[dict]:
