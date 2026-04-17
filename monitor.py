@@ -1,7 +1,7 @@
 """
-邮箱验证码监控 - 多账号，支持 Gmail(应用密码) + Outlook(OAuth2)
+邮箱验证码监控 - 多账号，支持 Gmail(应用密码/Push) + Outlook(OAuth2)
 """
-import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html, threading
+import os, re, time, imaplib, email as email_lib, logging, httpx, yaml, html, threading, base64, json
 from html.parser import HTMLParser
 from email.header import decode_header
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -31,6 +31,14 @@ OAUTH_CLIENT_ID     = cfg.get("oauth", {}).get("client_id", "7feada80-d946-4d06-
 OAUTH_CLIENT_SECRET = cfg.get("oauth", {}).get("client_secret", "")
 OAUTH_REDIRECT    = cfg.get("oauth", {}).get("redirect_uri", "https://oa.idays.gq/api/emails/oauth/outlook/callback")
 OAUTH_PORT        = cfg.get("oauth", {}).get("port", 8080)
+
+# Gmail Push 配置
+GMAIL_CLIENT_ID     = cfg.get("gmail_push", {}).get("client_id", "")
+GMAIL_CLIENT_SECRET = cfg.get("gmail_push", {}).get("client_secret", "")
+GMAIL_PUBSUB_TOPIC  = cfg.get("gmail_push", {}).get("pubsub_topic", "")
+GMAIL_PUSH_ENABLED  = bool(GMAIL_CLIENT_ID and GMAIL_PUBSUB_TOPIC)
+GMAIL_TOKEN_URL     = "https://oauth2.googleapis.com/token"
+GMAIL_AUTH_URL      = "https://accounts.google.com/o/oauth2/v2/auth"
 
 STARTUP_TIME = datetime.now(timezone.utc)  # 启动时间，用于过滤历史邮件
 CODE_RE = re.compile(r'\b\d{6}\b')
@@ -333,6 +341,166 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
         log.error(f"[Outlook IMAP:{acc['email']}] {e}")
     return results
 
+# ── Gmail Push OAuth ──────────────────────────────────────────────────────────
+_gmail_tokens: dict[str, dict] = {}  # email -> {access_token, refresh_token, expiry}
+_gmail_push_queue: list[dict] = []   # 待处理的 push 消息
+_gmail_push_lock = threading.Lock()
+
+GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify"
+
+def _gmail_refresh_token(email: str) -> str:
+    t = _gmail_tokens.get(email, {})
+    if t and time.time() < t.get("expiry", 0):
+        return t["access_token"]
+    r = httpx.post(GMAIL_TOKEN_URL, data={
+        "client_id": GMAIL_CLIENT_ID,
+        "client_secret": GMAIL_CLIENT_SECRET,
+        "refresh_token": t["refresh_token"],
+        "grant_type": "refresh_token",
+    }, timeout=10)
+    d = r.json()
+    if "access_token" not in d:
+        raise RuntimeError(f"Gmail token 刷新失败: {email} {d}")
+    _gmail_tokens[email]["access_token"] = d["access_token"]
+    _gmail_tokens[email]["expiry"] = time.time() + d.get("expires_in", 3600) - 60
+    return d["access_token"]
+
+def _gmail_watch(email: str):
+    """注册 Gmail Push Watch，有效期 7 天"""
+    try:
+        token = _gmail_refresh_token(email)
+        r = httpx.post(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/watch",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"topicName": GMAIL_PUBSUB_TOPIC, "labelIds": ["INBOX"]},
+            timeout=10
+        )
+        if r.status_code == 200:
+            log.info(f"[Gmail Push] {email} watch 注册成功，到期: {r.json().get('expiration')}")
+        else:
+            log.error(f"[Gmail Push] {email} watch 失败: {r.text[:200]}")
+    except Exception as e:
+        log.error(f"[Gmail Push] {email} watch 异常: {e}")
+
+def _gmail_fetch_message(email: str, msg_id: str) -> dict | None:
+    """获取单封邮件内容"""
+    try:
+        token = _gmail_refresh_token(email)
+        r = httpx.get(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"format": "full"},
+            timeout=10
+        )
+        if r.status_code != 200:
+            return None
+        msg = r.json()
+        headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+        subject = headers.get("subject", "")
+        from_   = headers.get("from", "")
+        date    = headers.get("date", "")
+        try:
+            date = parsedate_to_datetime(date).astimezone().strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            pass
+
+        # 提取 body
+        body = ""
+        def extract_parts(parts):
+            nonlocal body
+            for p in parts:
+                if p.get("mimeType") == "text/plain" and not body:
+                    data = p.get("body", {}).get("data", "")
+                    if data:
+                        body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                elif p.get("mimeType") == "text/html" and not body:
+                    data = p.get("body", {}).get("data", "")
+                    if data:
+                        body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+                if p.get("parts"):
+                    extract_parts(p["parts"])
+
+        payload = msg.get("payload", {})
+        if payload.get("parts"):
+            extract_parts(payload["parts"])
+        else:
+            data = payload.get("body", {}).get("data", "")
+            if data:
+                body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+
+        # 标为已读
+        httpx.post(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_id}/modify",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"removeLabelIds": ["UNREAD"]},
+            timeout=5
+        )
+        return {"subject": subject, "from": from_, "date": date, "body": body, "email": email}
+    except Exception as e:
+        log.error(f"[Gmail Push] 获取邮件失败 {email}/{msg_id}: {e}")
+        return None
+
+def _process_gmail_push(data: dict):
+    """处理 Pub/Sub 推送的 Gmail 通知"""
+    try:
+        msg_data = base64.b64decode(data.get("message", {}).get("data", "")).decode()
+        notification = json.loads(msg_data)
+        email = notification.get("emailAddress", "")
+        history_id = notification.get("historyId")
+        if not email or not history_id:
+            return
+
+        token = _gmail_refresh_token(email)
+        # 获取新邮件列表
+        r = httpx.get(
+            f"https://gmail.googleapis.com/gmail/v1/users/me/history",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"startHistoryId": history_id, "historyTypes": "messageAdded", "labelId": "INBOX"},
+            timeout=10
+        )
+        if r.status_code != 200:
+            return
+        for record in r.json().get("history", []):
+            for added in record.get("messagesAdded", []):
+                msg_id = added["message"]["id"]
+                if msg_id in _processed_msg_ids:
+                    continue
+                _processed_msg_ids.add(msg_id)
+                item = _gmail_fetch_message(email, msg_id)
+                if not item:
+                    continue
+                body = item["body"]
+                code = find_code(body) or find_code(item["subject"])
+                label = _gmail_tokens.get(email, {}).get("label", email)
+                if code or FORWARD_ALL:
+                    is_html = "<" in body and ">" in body
+                    plain = html_to_text(body)
+                    if code:
+                        text = (f"`{code}`\n\n📬 *{label}*\n"
+                                f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
+                        log.info(f"[Gmail Push:{label}] 验证码: {code}")
+                        send_tg(text)
+                        if FORWARD_ALL and is_html:
+                            send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", body)
+                    elif FORWARD_ALL:
+                        caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
+                                   f"时间: {item['date']}\n主题: {item['subject']}")
+                        if plain and len(plain) >= 50:
+                            send_tg(caption + f"\n\n{plain[:1500]}")
+                        else:
+                            send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
+                        if is_html:
+                            send_tg_document(caption, f"{item['subject'][:40]}.html", body)
+    except Exception as e:
+        log.error(f"[Gmail Push] 处理通知异常: {e}")
+
+def _renew_gmail_watches():
+    """每 6 天自动续期所有 Gmail Watch"""
+    while True:
+        time.sleep(6 * 24 * 3600)
+        for email in list(_gmail_tokens.keys()):
+            _gmail_watch(email)
+
 # ── OAuth2 回调服务 ───────────────────────────────────────────────────────────
 AUTH_URL = (
     f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
@@ -367,6 +535,71 @@ class OAuthHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._respond(500, f"授权失败: {e}")
                 log.error(f"OAuth 回调处理失败: {e}")
+
+        # Gmail 授权入口
+        elif parsed.path == "/auth/gmail":
+            params = parse_qs(parsed.query)
+            redirect = f"https://oa.idays.gq/api/gmail/oauth/callback"
+            url = (f"{GMAIL_AUTH_URL}?client_id={GMAIL_CLIENT_ID}"
+                   f"&redirect_uri={redirect}&response_type=code"
+                   f"&scope={GMAIL_SCOPES.replace(' ', '%20')}"
+                   f"&access_type=offline&prompt=consent")
+            self._redirect(url)
+
+        # Gmail OAuth 回调
+        elif parsed.path == "/api/gmail/oauth/callback":
+            params = parse_qs(parsed.query)
+            code = params.get("code", [None])[0]
+            if not code:
+                self._respond(400, "缺少 code 参数")
+                return
+            try:
+                redirect = f"https://oa.idays.gq/api/gmail/oauth/callback"
+                r = httpx.post(GMAIL_TOKEN_URL, data={
+                    "client_id": GMAIL_CLIENT_ID,
+                    "client_secret": GMAIL_CLIENT_SECRET,
+                    "code": code,
+                    "redirect_uri": redirect,
+                    "grant_type": "authorization_code",
+                }, timeout=15)
+                d = r.json()
+                if "refresh_token" not in d:
+                    raise RuntimeError(d.get("error_description", d))
+                # 获取邮箱地址
+                me = httpx.get("https://www.googleapis.com/oauth2/v2/userinfo",
+                               headers={"Authorization": f"Bearer {d['access_token']}"}, timeout=10)
+                email = me.json().get("email", "")
+                # 找到对应账号的 label
+                label = email
+                for acc in cfg.get("accounts", []):
+                    for mb in (acc.get("mailboxes") or []):
+                        if mb.get("email") == email:
+                            label = mb.get("label", email)
+                _gmail_tokens[email] = {
+                    "access_token": d["access_token"],
+                    "refresh_token": d["refresh_token"],
+                    "expiry": time.time() + d.get("expires_in", 3600) - 60,
+                    "label": label,
+                }
+                _save_gmail_token(email, d["refresh_token"])
+                _gmail_watch(email)
+                self._respond(200, f"✅ Gmail 授权成功！{email} 已启用 Push 监控。")
+                send_tg(f"✅ Gmail Push 已启用：`{email}`")
+                log.info(f"Gmail Push 授权成功：{email}")
+            except Exception as e:
+                self._respond(500, f"授权失败: {e}")
+                log.error(f"Gmail OAuth 回调失败: {e}")
+
+        # Gmail Pub/Sub Push 接收
+        elif parsed.path == "/api/gmail/push":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            self._respond(200, "ok")
+            try:
+                data = json.loads(body)
+                threading.Thread(target=_process_gmail_push, args=(data,), daemon=True).start()
+            except Exception as e:
+                log.error(f"[Gmail Push] 解析推送失败: {e}")
         else:
             self._respond(404, "Not Found")
 
@@ -453,6 +686,20 @@ def _save_outlook_account(refresh_token: str, email: str):
         f.write(content)
 
 
+def _save_gmail_token(email: str, refresh_token: str):
+    """保存 Gmail refresh_token 到 config.yaml"""
+    with open(CONFIG_FILE) as f:
+        content = f.read()
+    data = yaml.safe_load(content)
+    for entry in data.get("accounts", []):
+        if entry.get("type") == "gmail":
+            for mb in (entry.get("mailboxes") or []):
+                if mb.get("email") == email:
+                    mb["gmail_refresh_token"] = refresh_token
+    with open(CONFIG_FILE, "w") as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
+
+
 def start_oauth_server():
     server = HTTPServer(("0.0.0.0", OAUTH_PORT), OAuthHandler)
     log.info(f"OAuth 回调服务已启动，授权入口: http://0.0.0.0:{OAUTH_PORT}/auth/outlook")
@@ -497,8 +744,24 @@ def main():
     auth_url = OAUTH_REDIRECT.replace("/api/emails/oauth/outlook/callback", "/auth/outlook")
     if OAUTH_ENABLED:
         parts.append(f"➕ [添加 Outlook 账号]({auth_url})")
+    if GMAIL_PUSH_ENABLED:
+        parts.append(f"➕ [添加 Gmail Push]({auth_url.replace('/auth/outlook', '/auth/gmail')})")
 
     send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
+
+    # 加载已有 Gmail Push token 并注册 watch
+    if GMAIL_PUSH_ENABLED:
+        for acc in accounts:
+            if acc.get("type") == "gmail" and acc.get("gmail_refresh_token"):
+                email = acc["email"]
+                _gmail_tokens[email] = {
+                    "access_token": "",
+                    "refresh_token": acc["gmail_refresh_token"],
+                    "expiry": 0,
+                    "label": acc.get("label", email),
+                }
+                _gmail_watch(email)
+        threading.Thread(target=_renew_gmail_watches, daemon=True).start()
 
     first_run = True
     while True:
