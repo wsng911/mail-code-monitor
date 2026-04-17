@@ -407,16 +407,24 @@ def _save_outlook_account(refresh_token: str, email: str):
     with open(CONFIG_FILE) as f:
         content = f.read()
 
-    # 已存在则替换 refresh_token
-    if f'email: "{email}"' in content or f"email: {email}" in content:
+    # 用 yaml 解析判断是否已存在
+    data = yaml.safe_load(content)
+    exists = False
+    for entry in data.get("accounts", []):
+        if entry.get("type") == "outlook":
+            for mb in entry.get("mailboxes", []):
+                if mb.get("email") == email:
+                    exists = True
+                    break
+
+    if exists:
+        # 替换该邮箱对应的 refresh_token（找到 email 行后的第一个 refresh_token）
         import re as _re
-        # 找到该邮箱后的第一个 refresh_token 行并替换
-        pattern = rf'(email: ["\']?{_re.escape(email)}["\']?\n\s+refresh_token: )[^\n]+'
+        pattern = rf'(email:\s*["\']?{_re.escape(email)}["\']?\s*\n\s+refresh_token:\s*)[^\n]+'
         new_content = _re.sub(pattern, rf'\g<1>"{refresh_token}"', content, count=1)
-        if new_content != content:
-            with open(CONFIG_FILE, "w") as f:
-                f.write(new_content)
-            return
+        with open(CONFIG_FILE, "w") as f:
+            f.write(new_content)
+        return
 
     # 不存在则追加
     new_entry = (
