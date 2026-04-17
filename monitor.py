@@ -284,8 +284,12 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
             received_dt = None
         # 跳过启动前的历史邮件
         if received_dt and received_dt < STARTUP_TIME:
-            httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
-                        json={"isRead": True}, headers=headers, timeout=10)
+            try:
+                httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
+                            json={"isRead": True}, headers=headers, timeout=3)
+            except Exception:
+                pass
+            _processed_msg_ids.add(msg_id)
             continue
         code    = find_code(body) or find_code(subject)
         if not skip_existing and (code or FORWARD_ALL):
@@ -333,7 +337,7 @@ def _outlook_imap(acc: dict, token: str, label: str, skip_existing: bool = False
 AUTH_URL = (
     f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
     f"?client_id={{client_id}}&response_type=code&redirect_uri={{redirect}}"
-    f"&scope=https://graph.microsoft.com/Mail.Read%20https://graph.microsoft.com/User.Read%20offline_access&prompt=select_account"
+    f"&scope=https://graph.microsoft.com/Mail.Read%20https://graph.microsoft.com/Mail.ReadWrite%20https://graph.microsoft.com/User.Read%20offline_access&prompt=select_account"
 )
 
 class OAuthHandler(BaseHTTPRequestHandler):
@@ -387,7 +391,7 @@ def _exchange_code(code: str) -> tuple[str, str]:
         "grant_type":   "authorization_code",
         "code":         code,
         "redirect_uri": OAUTH_REDIRECT,
-        "scope":        "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/User.Read offline_access",
+        "scope":        "https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/User.Read offline_access",
         "token_endpoint_auth_method": "none",
     }
     if OAUTH_CLIENT_SECRET:
