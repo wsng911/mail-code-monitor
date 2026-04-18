@@ -132,9 +132,9 @@ def wrap_html(html_body: str, *, subject: str = "", from_: str = "", to: str = "
     def row(label, val):
         return f"<tr><td style='color:#888;white-space:nowrap;padding:2px 12px 2px 0'>{label}</td><td style='word-break:break-all'>{html.escape(val)}</td></tr>" if val else ""
     header = (
-        "<div style='font-family:sans-serif;font-size:13px;background:#1e1e1e;color:#ccc;"
-        "border-bottom:1px solid #333;padding:12px 16px;margin-bottom:12px'>"
-        f"<div style='font-size:15px;font-weight:bold;margin-bottom:8px'>{html.escape(subject)}</div>"
+        "<div style='font-family:sans-serif;font-size:13px;background:#f5f5f5;color:#333;"
+        "border-bottom:2px solid #ddd;padding:12px 16px;margin-bottom:12px'>"
+        f"<div style='font-size:15px;font-weight:bold;color:#111;margin-bottom:8px'>{html.escape(subject)}</div>"
         "<table style='border-collapse:collapse'>"
         + row("发件人", from_)
         + row("收件人", to)
