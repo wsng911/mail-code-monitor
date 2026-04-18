@@ -1073,9 +1073,6 @@ def main():
                 lines.append(_line(l))
         return "**>" + "\n>".join(lines) + "||"
 
-    VERSION = os.environ.get("APP_VERSION", "dev")
-    send_tg(f"✅ 监控已启动 `{_esc(VERSION)}`，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
-
     send_tg(_make_guide("📋 Gmail Push 配置备忘", [
         ("Google Cloud 控制台", [
             "地址：`console.cloud.google.com`",
@@ -1129,6 +1126,8 @@ def main():
             "3. client_secret 到期需去 Azure 重新生成并更新 config",
         ]),
     ]))
+
+    send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
 
     # 加载已有 Gmail Push token 并注册 watch
     if GMAIL_PUSH_ENABLED:
