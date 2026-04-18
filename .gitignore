@@ -3,10 +3,15 @@ config/accounts.json
 .env
 __pycache__/
 *.pyc
-tg/
-tg.zip
-._tg.zip
+
+# 敏感/大文件
 tg/
 tg.zip
 ._tg.zip
 TGG.json
+*.json
+*.zip
+*.log
+
+# 只允许示例配置
+!config/config.yaml.example
