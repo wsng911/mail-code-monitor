@@ -335,13 +335,9 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                 send_tg_document(f"{subject[:40]}.html",
                                  wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
         elif FORWARD_ALL:
-            header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
-                      f">{_esc('发件人')}: {_esc(sender)}\n"
-                      f">{_esc('时间')}: {_esc(date)}\n"
-                      f">{_esc('主题')}: {_esc(subject)}")
-            if send_tg(header):
-                send_tg_document(f"{subject[:40]}.html",
-                                 wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
+            log.info(f"[QQ IDLE:{to_addr}] 转发邮件: {subject}")
+            send_tg_document(f"{subject[:40]}.html",
+                             wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
     except Exception as e:
         log.error(f"[QQ IDLE] 处理邮件失败: {e}")
 
@@ -599,13 +595,9 @@ def _process_outlook_push(data: dict):
                         send_tg_document(f"{subject[:40]}.html",
                                          wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
                 elif FORWARD_ALL:
-                    header = (f">{_esc('📩')} *{_esc(label)}*\n"
-                              f">{_esc('发件人')}: {_esc(sender)}\n"
-                              f">{_esc('时间')}: {_esc(date)}\n"
-                              f">{_esc('主题')}: {_esc(subject)}")
-                    if send_tg(header):
-                        send_tg_document(f"{subject[:40]}.html",
-                                         wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
+                    log.info(f"[Outlook Push:{label}] 转发邮件: {subject}")
+                    send_tg_document(f"{subject[:40]}.html",
+                                     wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
 
@@ -1258,10 +1250,8 @@ def main():
                 if send_tg(text) and FORWARD_ALL:
                     _send_attach(item, attach_html)
             elif FORWARD_ALL:
-                header = (f">{_esc('📩')} *{_esc(item['label'])}*\n" + _meta(item))
                 log.info(f"[{item['label']}] 转发邮件: {item['subject']}")
-                if send_tg(header):
-                    _send_attach(item, attach_html)
+                _send_attach(item, attach_html)
         first_run = False
         time.sleep(POLL_INTERVAL)
 
