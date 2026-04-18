@@ -1060,22 +1060,26 @@ def main():
     if GMAIL_PUSH_ENABLED:
         parts.append(f"➕ [Gmail Push 授权]({auth_url.replace('/auth/outlook', '/auth/gmail')})")
 
-    def _guide_line(text: str) -> str:
-        """对含有 `code` 的行做分段转义：代码块内不转义，其余部分转义"""
-        parts_line = re.split(r'(`[^`]*`)', text)
-        return "".join(p if p.startswith("`") else _esc(p) for p in parts_line)
-
-    def _make_guide(title: str, sections: list[tuple[str, list[str]]]) -> str:
-        """生成折叠备忘录，sections = [(section_title, [line, ...]), ...]"""
-        lines = [_esc(f"📋 {title}")]
+    def _make_guide_html(title: str, sections: list[tuple[str, list[str]]]) -> str:
+        html_parts = [f"<h2>{title}</h2>"]
         for sec_title, sec_lines in sections:
-            lines.append("")
-            lines.append(_esc(f"▌ {sec_title}"))
-            for l in sec_lines:
-                lines.append(_guide_line(l))
-        return "||" + "\n".join(lines) + "||"
+            html_parts.append(f"<h3>{sec_title}</h3><ul>")
+            for line in sec_lines:
+                # 将 `code` 转为 <code> 标签
+                line_html = re.sub(r'`([^`]+)`', r'<code>\1</code>', line)
+                html_parts.append(f"<li>{line_html}</li>")
+            html_parts.append("</ul>")
+        return (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<style>body{font-family:sans-serif;padding:16px;background:#1e1e1e;color:#ddd}"
+            "h2{color:#7ec8e3}h3{color:#aaa;margin-top:16px}code{background:#333;padding:2px 6px;"
+            "border-radius:4px;font-size:0.9em}ul{padding-left:20px}li{margin:4px 0}</style></head>"
+            f"<body>{''.join(html_parts)}</body></html>"
+        )
 
-    gmail_guide = _make_guide("Gmail Push 配置备忘", [
+    send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
+
+    send_tg_document("Gmail Push 配置备忘.html", _make_guide_html("📋 Gmail Push 配置备忘", [
         ("Google Cloud 控制台", [
             "地址：`console.cloud.google.com`",
             "项目：`mail-monitor-493615`",
@@ -1102,9 +1106,9 @@ def main():
             "3. 点 Gmail Push 授权链接重新授权各账号",
             "4. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息",
         ]),
-    ])
+    ]))
 
-    outlook_guide = _make_guide("Outlook Push 配置备忘", [
+    send_tg_document("Outlook Push 配置备忘.html", _make_guide_html("📋 Outlook Push 配置备忘", [
         ("Azure 应用注册", [
             "地址：`portal.azure.com`",
             "应用名：`imail`",
@@ -1115,7 +1119,7 @@ def main():
             "地址：`https://oa.idays.gq/api/emails/oauth/outlook/callback`",
         ]),
         ("API 权限", [
-            "`Mail.Read` / `Mail.ReadWrite` / `User.Read` / `offline_access`",
+            "Mail.Read / Mail.ReadWrite / User.Read / offline_access",
             "允许公共客户端流：已启用",
         ]),
         ("Change Notifications 端点", [
@@ -1127,11 +1131,7 @@ def main():
             "2. 授权后自动注册 Change Notifications 订阅",
             "3. client_secret 到期需去 Azure 重新生成并更新 config",
         ]),
-    ])
-
-    parts.append(gmail_guide)
-    parts.append(outlook_guide)
-    send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
+    ]))
 
     # 加载已有 Gmail Push token 并注册 watch
     if GMAIL_PUSH_ENABLED:
