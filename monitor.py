@@ -321,8 +321,8 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
             return
 
         plain = html_to_text(body)
-        is_html = bool(html_body)
         sender = decode_from(msg)
+        attach_html = html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
 
         if code:
             text = (f"`{code}`\n\n"
@@ -331,22 +331,17 @@ def _process_imap_uid(imap, uid: bytes, acc: dict, label: str):
                     f">{_esc('时间')}: {_esc(date)}\n"
                     f">{_esc('主题')}: {_esc(subject)}")
             log.info(f"[QQ IDLE:{to_addr}] 验证码: {code}")
-            send_tg(text)
-            if FORWARD_ALL and is_html:
+            if send_tg(text) and FORWARD_ALL:
                 send_tg_document(f"{subject[:40]}.html",
-                                 wrap_html(html_body, subject=subject, from_=sender, to=to_addr, date=date))
+                                 wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
         elif FORWARD_ALL:
             header = (f">{_esc('📩')} *{_esc(to_addr)}*\n"
                       f">{_esc('发件人')}: {_esc(sender)}\n"
                       f">{_esc('时间')}: {_esc(date)}\n"
                       f">{_esc('主题')}: {_esc(subject)}")
-            if plain and len(plain) >= 50:
-                send_tg(header + f"\n\n||{_esc(plain[:1500])}||")
-            else:
-                send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
-            if is_html:
+            if send_tg(header):
                 send_tg_document(f"{subject[:40]}.html",
-                                 wrap_html(html_body, subject=subject, from_=sender, to=to_addr, date=date))
+                                 wrap_html(attach_html, subject=subject, from_=sender, to=to_addr, date=date))
     except Exception as e:
         log.error(f"[QQ IDLE] 处理邮件失败: {e}")
 
@@ -589,25 +584,28 @@ def _process_outlook_push(data: dict):
             except Exception:
                 pass
 
+            plain = html_to_text(body)
+            attach_html = body if is_html else f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
+
             if code or FORWARD_ALL:
                 if code:
-                    text = (f"`{code}`\n\n📬 *{label}*\n"
-                            f"发件人: {sender}\n时间: {date}\n主题: {subject}")
+                    text = (f"`{_esc(code)}`\n\n"
+                            f">{_esc('📬')} *{_esc(label)}*\n"
+                            f">{_esc('发件人')}: {_esc(sender)}\n"
+                            f">{_esc('时间')}: {_esc(date)}\n"
+                            f">{_esc('主题')}: {_esc(subject)}")
                     log.info(f"[Outlook Push:{label}] 验证码: {code}")
-                    send_tg(text)
-                    if FORWARD_ALL and is_html:
+                    if send_tg(text) and FORWARD_ALL:
                         send_tg_document(f"{subject[:40]}.html",
-                                         wrap_html(body, subject=subject, from_=sender, to=label, date=date))
+                                         wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
                 elif FORWARD_ALL:
-                    plain = html_to_text(body)
-                    caption = f"📩 *{label}*\n发件人: {sender}\n时间: {date}\n主题: {subject}"
-                    if plain and len(plain) >= 50:
-                        send_tg(caption + f"\n\n{plain[:1500]}")
-                    else:
-                        send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
-                    if is_html:
+                    header = (f">{_esc('📩')} *{_esc(label)}*\n"
+                              f">{_esc('发件人')}: {_esc(sender)}\n"
+                              f">{_esc('时间')}: {_esc(date)}\n"
+                              f">{_esc('主题')}: {_esc(subject)}")
+                    if send_tg(header):
                         send_tg_document(f"{subject[:40]}.html",
-                                         wrap_html(body, subject=subject, from_=sender, to=label, date=date))
+                                         wrap_html(attach_html, subject=subject, from_=sender, to=label, date=date))
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
 
@@ -1238,39 +1236,32 @@ def main():
             body_raw = item.get("body", "")
             html_body = item.get("html_body", "")
             plain = html_to_text(body_raw)
-            is_html = bool(item.get("html_body"))
+            # 没有 HTML 时把纯文本包成简单 HTML
+            attach_html = html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
+
+            def _meta(item):
+                return (f">{_esc('发件人')}: {_esc(item['from'])}\n"
+                        f">{_esc('时间')}: {_esc(item.get('date', ''))}\n"
+                        f">{_esc('主题')}: {_esc(item['subject'])}")
+
+            def _send_attach(item, content):
+                send_tg_document(f"{item['subject'][:40]}.html",
+                                 wrap_html(content, subject=item['subject'], from_=item['from'],
+                                           to=item.get('to', item['label']), date=item.get('date', ''),
+                                           received=item.get('received', '')))
 
             if item.get("code"):
                 text = (f"`{item['code']}`\n\n"
                         f">{_esc('📬')} *{_esc(item['label'])}*\n"
-                        f">{_esc('发件人')}: {_esc(item['from'])}\n"
-                        f">{_esc('时间')}: {_esc(item.get('date', ''))}\n"
-                        f">{_esc('主题')}: {_esc(item['subject'])}")
+                        + _meta(item))
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
-                if send_tg(text) and FORWARD_ALL and is_html and body_raw:
-                    send_tg_document(f"{item['subject'][:40]}.html",
-                                     wrap_html(html_body, subject=item['subject'], from_=item['from'],
-                                               to=item.get('to', item['label']), date=item.get('date', ''),
-                                               received=item.get('received', '')))
-            else:
-                header = (f">{_esc('📩')} *{_esc(item['label'])}*\n"
-                          f">{_esc('发件人')}: {_esc(item['from'])}\n"
-                          f">{_esc('时间')}: {_esc(item.get('date', ''))}\n"
-                          f">{_esc('主题')}: {_esc(item['subject'])}")
+                if send_tg(text) and FORWARD_ALL:
+                    _send_attach(item, attach_html)
+            elif FORWARD_ALL:
+                header = (f">{_esc('📩')} *{_esc(item['label'])}*\n" + _meta(item))
                 log.info(f"[{item['label']}] 转发邮件: {item['subject']}")
-                if plain and len(plain) >= 50:
-                    spoiler = f"||{_esc(plain[:1500])}||"
-                    if send_tg(header + f"\n\n{spoiler}") and is_html and len(plain) > 1500:
-                        send_tg_document(f"{item['subject'][:40]}.html",
-                                         wrap_html(html_body, subject=item['subject'], from_=item['from'],
-                                                   to=item.get('to', item['label']), date=item.get('date', ''),
-                                                   received=item.get('received', '')))
-                else:
-                    if send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}") and is_html:
-                        send_tg_document(f"{item['subject'][:40]}.html",
-                                         wrap_html(html_body, subject=item['subject'], from_=item['from'],
-                                                   to=item.get('to', item['label']), date=item.get('date', ''),
-                                                   received=item.get('received', '')))
+                if send_tg(header):
+                    _send_attach(item, attach_html)
         first_run = False
         time.sleep(POLL_INTERVAL)
 
