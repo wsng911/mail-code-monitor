@@ -99,12 +99,12 @@ def send_tg(text: str):
     except Exception as e:
         log.error(f"TG 推送异常: {e}")
 
-def send_tg_document(caption: str, filename: str, content: str):
-    """发送 HTML 文件附件"""
+def send_tg_document(content: str):
+    """发送 HTML 文件附件（无 caption，文字已单独发送）"""
     try:
         r = httpx.post(
             f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendDocument",
-            data={"chat_id": TG_CHAT_ID, "caption": caption},
+            data={"chat_id": TG_CHAT_ID},
             files={"document": (filename, content.encode("utf-8"), "text/html")},
             timeout=30
         )
@@ -444,7 +444,7 @@ def _process_outlook_push(data: dict):
                     log.info(f"[Outlook Push:{label}] 验证码: {code}")
                     send_tg(text)
                     if FORWARD_ALL and is_html:
-                        send_tg_document(f"📎 {subject[:60]}", f"{subject[:40]}.html", body)
+                        send_tg_document(f"{subject[:40]}.html", body)
                 elif FORWARD_ALL:
                     plain = html_to_text(body)
                     caption = f"📩 *{label}*\n发件人: {sender}\n时间: {date}\n主题: {subject}"
@@ -453,7 +453,7 @@ def _process_outlook_push(data: dict):
                     else:
                         send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
                     if is_html:
-                        send_tg_document(caption, f"{subject[:40]}.html", body)
+                        send_tg_document(f"{subject[:40]}.html", body)
     except Exception as e:
         log.error(f"[Outlook Push] 处理通知异常: {e}")
 
@@ -623,7 +623,7 @@ def _process_gmail_push(data: dict):
                         log.info(f"[Gmail Push:{label}] 验证码: {code}")
                         send_tg(text)
                         if FORWARD_ALL and html_body:
-                            send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", html_body)
+                            send_tg_document(f"{item['subject'][:40]}.html", html_body)
                     elif FORWARD_ALL:
                         caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
                                    f"时间: {item['date']}\n主题: {item['subject']}")
@@ -632,7 +632,7 @@ def _process_gmail_push(data: dict):
                         else:
                             send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
                         if html_body:
-                            send_tg_document(caption, f"{item['subject'][:40]}.html", html_body)
+                            send_tg_document(f"{item['subject'][:40]}.html", html_body)
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
 
@@ -1007,7 +1007,7 @@ def main():
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
                 send_tg(text)
                 if FORWARD_ALL and is_html and body_raw:
-                    send_tg_document(f"📎 {item['subject'][:60]}", f"{item['subject'][:40]}.html", body_raw)
+                    send_tg_document(f"{item['subject'][:40]}.html", body_raw)
             else:
                 caption = (f"📩 *{item['label']}*\n"
                            f"发件人: {item['from']}\n"
@@ -1020,11 +1020,11 @@ def main():
                         text += "\n…（内容已截断）"
                     send_tg(text)
                     if is_html and len(plain) > 1500:
-                        send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
+                        send_tg_document(f"{item['subject'][:40]}.html", body_raw)
                 else:
                     send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
                     if is_html and body_raw:
-                        send_tg_document(caption, f"{item['subject'][:40]}.html", body_raw)
+                        send_tg_document(f"{item['subject'][:40]}.html", body_raw)
         first_run = False
         time.sleep(POLL_INTERVAL)
 
