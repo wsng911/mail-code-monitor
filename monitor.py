@@ -419,7 +419,7 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
     results = []
     headers = {"Authorization": f"Bearer {token}"}
     r = httpx.get("https://graph.microsoft.com/v1.0/me/messages",
-                  params={"$filter": "isRead eq false", "$select": "id,subject,from,body,receivedDateTime",
+                  params={"$filter": "isRead eq false", "$select": "id,subject,from,toRecipients,body,receivedDateTime",
                           "$top": 10, "$orderby": "receivedDateTime desc"},
                   headers=headers, timeout=15)
     if r.status_code != 200:
@@ -449,8 +449,10 @@ def _outlook_graph(acc: dict, token: str, label: str, skip_existing: bool = Fals
             _processed_msg_ids.add(msg_id)
             continue
         code    = find_code(body) or find_code(subject)
+        to_addr = next((r["emailAddress"]["address"] for r in msg.get("toRecipients", [])
+                        if r.get("emailAddress", {}).get("address")), label)
         if not skip_existing and (code or FORWARD_ALL):
-            results.append({"label": label, "subject": subject, "from": sender, "code": code, "body": body, "date": date})
+            results.append({"label": to_addr, "subject": subject, "from": sender, "code": code, "body": body, "date": date})
         try:
             httpx.patch(f"https://graph.microsoft.com/v1.0/me/messages/{msg['id']}",
                         json={"isRead": True}, headers=headers, timeout=3)
