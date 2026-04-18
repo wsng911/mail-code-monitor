@@ -1232,7 +1232,7 @@ def main():
 
         for item in all_items:
             body_raw = item.get("body", "")
-            html_body = item.get("html_body", "") or body_raw
+            html_body = item.get("html_body", "")
             plain = html_to_text(body_raw)
             is_html = bool(item.get("html_body"))
 
