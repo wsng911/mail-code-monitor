@@ -769,24 +769,30 @@ def _process_gmail_push(data: dict):
                 code = find_code(body) or find_code(item["subject"])
                 label = _gmail_tokens.get(email, {}).get("label", email)
                 html_body = item.get("html_body", "")
+                plain = html_to_text(body)
+                attach_html = html_body or f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{html.escape(plain)}</pre>"
                 if code or FORWARD_ALL:
-                    plain = html_to_text(body)
                     if code:
-                        text = (f"`{code}`\n\n📬 *{label}*\n"
-                                f"发件人: {item['from']}\n时间: {item['date']}\n主题: {item['subject']}")
+                        text = (f"`{_esc(code)}`\n\n"
+                                f">{_esc('📬')} *{_esc(label)}*\n"
+                                f">{_esc('发件人')}: {_esc(item['from'])}\n"
+                                f">{_esc('时间')}: {_esc(item['date'])}\n"
+                                f">{_esc('主题')}: {_esc(item['subject'])}")
                         log.info(f"[Gmail Push:{label}] 验证码: {code}")
-                        send_tg(text)
-                        if FORWARD_ALL and html_body:
-                            send_tg_document(f"{item['subject'][:40]}.html", html_body)
+                        if send_tg(text) and FORWARD_ALL:
+                            send_tg_document(f"{item['subject'][:40]}.html",
+                                             wrap_html(attach_html, subject=item['subject'], from_=item['from'],
+                                                       to=label, date=item['date']))
                     elif FORWARD_ALL:
-                        caption = (f"📩 *{label}*\n发件人: {item['from']}\n"
-                                   f"时间: {item['date']}\n主题: {item['subject']}")
-                        if plain and len(plain) >= 50:
-                            send_tg(caption + f"\n\n{plain[:1500]}")
-                        else:
-                            send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
-                        if html_body:
-                            send_tg_document(f"{item['subject'][:40]}.html", html_body)
+                        header = (f">{_esc('📩')} *{_esc(label)}*\n"
+                                  f">{_esc('发件人')}: {_esc(item['from'])}\n"
+                                  f">{_esc('时间')}: {_esc(item['date'])}\n"
+                                  f">{_esc('主题')}: {_esc(item['subject'])}")
+                        log.info(f"[Gmail Push:{label}] 转发邮件: {item['subject']}")
+                        if send_tg(header):
+                            send_tg_document(f"{item['subject'][:40]}.html",
+                                             wrap_html(attach_html, subject=item['subject'], from_=item['from'],
+                                                       to=label, date=item['date']))
     except Exception as e:
         log.error(f"[Gmail Push] 处理通知异常: {e}")
 
