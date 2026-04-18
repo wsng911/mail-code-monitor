@@ -89,11 +89,17 @@ def html_to_text(raw: str) -> str:
     except Exception:
         return re.sub(r'<[^>]+>', '', html.unescape(raw)).strip()
 
+def _esc(text: str) -> str:
+    """MarkdownV2 特殊字符转义"""
+    for c in r'\_*[]()~`>#+-=|{}.!':
+        text = text.replace(c, f'\\{c}')
+    return text
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 def send_tg(text: str):
     try:
         r = httpx.post(f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
-                       json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+                       json={"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "MarkdownV2"}, timeout=10)
         if r.status_code != 200:
             log.error(f"TG 推送失败: {r.text}")
     except Exception as e:
@@ -1000,29 +1006,28 @@ def main():
 
             if item.get("code"):
                 text = (f"`{item['code']}`\n\n"
-                        f"📬 *{item['label']}*\n"
-                        f"发件人: {item['from']}\n"
-                        f"时间: {item.get('date', '')}\n"
-                        f"主题: {item['subject']}")
+                        f">{_esc('📬')} *{_esc(item['label'])}*\n"
+                        f">{_esc('发件人')}: {_esc(item['from'])}\n"
+                        f">{_esc('时间')}: {_esc(item.get('date', ''))}\n"
+                        f">{_esc('主题')}: {_esc(item['subject'])}")
                 log.info(f"[{item['label']}] 验证码: {item['code']}")
                 send_tg(text)
                 if FORWARD_ALL and is_html and body_raw:
                     send_tg_document(f"{item['subject'][:40]}.html", body_raw)
             else:
-                caption = (f"📩 *{item['label']}*\n"
-                           f"发件人: {item['from']}\n"
-                           f"时间: {item.get('date', '')}\n"
-                           f"主题: {item['subject']}")
+                header = (f">{_esc('📩')} *{_esc(item['label'])}*\n"
+                          f">{_esc('发件人')}: {_esc(item['from'])}\n"
+                          f">{_esc('时间')}: {_esc(item.get('date', ''))}\n"
+                          f">{_esc('主题')}: {_esc(item['subject'])}")
                 log.info(f"[{item['label']}] 转发邮件: {item['subject']}")
                 if plain and len(plain) >= 50:
-                    text = caption + f"\n\n{plain[:1500]}"
-                    if len(plain) > 1500:
-                        text += "\n…（内容已截断）"
+                    spoiler = f"||{_esc(plain[:1500])}||"
+                    text = header + f"\n\n{spoiler}"
                     send_tg(text)
                     if is_html and len(plain) > 1500:
                         send_tg_document(f"{item['subject'][:40]}.html", body_raw)
                 else:
-                    send_tg(caption + "\n\n📎 邮件以图片为主，已附原始文件")
+                    send_tg(header + f"\n\n{_esc('📎 邮件以图片为主，已附原始文件')}")
                     if is_html and body_raw:
                         send_tg_document(f"{item['subject'][:40]}.html", body_raw)
         first_run = False
