@@ -105,7 +105,7 @@ def send_tg(text: str):
     except Exception as e:
         log.error(f"TG 推送异常: {e}")
 
-def send_tg_document(content: str):
+def send_tg_document(filename: str, content: str):
     """发送 HTML 文件附件（无 caption，文字已单独发送）"""
     try:
         r = httpx.post(
@@ -1060,49 +1060,75 @@ def main():
     if GMAIL_PUSH_ENABLED:
         parts.append(f"➕ [Gmail Push 授权]({auth_url.replace('/auth/outlook', '/auth/gmail')})")
 
-    gmail_guide = (
-        "||📋 Gmail Push 配置备忘\n\n"
-        "▌ Google Cloud 控制台\n"
-        "地址：`console.cloud.google.com`\n"
-        "项目：`mail-monitor-493615`\n\n"
-        "▌ Pub/Sub Topic\n"
-        "名称：`gmail-push`\n"
-        "路径：`projects/mail-monitor-493615/topics/gmail-push`\n"
-        "发布者：`gmail-api-push@system.gserviceaccount.com`\n\n"
-        "▌ Pub/Sub 订阅\n"
-        "名称：`gmail-push-sub`\n"
-        "端点：`https://oa.idays.gq/api/gmail/push`\n\n"
-        "▌ OAuth 客户端\n"
-        "ID：`1081529245632-cvnkkf4clntgsimne1se6khv5u0t0c5j.apps.googleusercontent.com`\n"
-        "回调：`https://oa.idays.gq/api/gmail/oauth/callback`\n\n"
-        "▌ Search Console 域名验证\n"
-        "验证地址：`https://oa.idays.gq/google883877c5c8e86eea.html`\n\n"
-        "▌ 重装后操作\n"
-        "1\\. Pub/Sub 订阅无需重建\n"
-        "2\\. 域名验证永久有效\n"
-        "3\\. 点 Gmail Push 授权链接重新授权各账号\n"
-        "4\\. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息||"
-    )
-    outlook_guide = (
-        "||📋 Outlook Push 配置备忘\n\n"
-        "▌ Azure 应用注册\n"
-        "地址：`portal.azure.com`\n"
-        "应用名：`imail`\n"
-        "应用 ID：`2e6ee5ed-2fb6-454c-8e1b-a5515b78571b`\n\n"
-        "▌ 重定向 URI\n"
-        "类型：移动和桌面应用程序\n"
-        "地址：`https://oa.idays.gq/api/emails/oauth/outlook/callback`\n\n"
-        "▌ API 权限\n"
-        "`Mail.Read` / `Mail.ReadWrite` / `User.Read` / `offline_access`\n"
-        "允许公共客户端流：已启用\n\n"
-        "▌ Change Notifications 端点\n"
-        "`https://oa.idays.gq/api/outlook/push`\n"
-        "订阅有效期：3 天，程序自动续期\n\n"
-        "▌ 重装后操作\n"
-        "1\\. 点 Outlook Push 授权链接重新授权各账号\n"
-        "2\\. 授权后自动注册 Change Notifications 订阅\n"
-        "3\\. client\\_secret 到期需去 Azure 重新生成并更新 config||"
-    )
+    def _guide_line(text: str) -> str:
+        """对含有 `code` 的行做分段转义：代码块内不转义，其余部分转义"""
+        parts_line = re.split(r'(`[^`]*`)', text)
+        return "".join(p if p.startswith("`") else _esc(p) for p in parts_line)
+
+    def _make_guide(title: str, sections: list[tuple[str, list[str]]]) -> str:
+        """生成折叠备忘录，sections = [(section_title, [line, ...]), ...]"""
+        lines = [_esc(f"📋 {title}")]
+        for sec_title, sec_lines in sections:
+            lines.append("")
+            lines.append(_esc(f"▌ {sec_title}"))
+            for l in sec_lines:
+                lines.append(_guide_line(l))
+        return "||" + "\n".join(lines) + "||"
+
+    gmail_guide = _make_guide("Gmail Push 配置备忘", [
+        ("Google Cloud 控制台", [
+            "地址：`console.cloud.google.com`",
+            "项目：`mail-monitor-493615`",
+        ]),
+        ("Pub/Sub Topic", [
+            "名称：`gmail-push`",
+            "路径：`projects/mail-monitor-493615/topics/gmail-push`",
+            "发布者：`gmail-api-push@system.gserviceaccount.com`",
+        ]),
+        ("Pub/Sub 订阅", [
+            "名称：`gmail-push-sub`",
+            "端点：`https://oa.idays.gq/api/gmail/push`",
+        ]),
+        ("OAuth 客户端", [
+            "ID：`1081529245632-cvnkkf4clntgsimne1se6khv5u0t0c5j.apps.googleusercontent.com`",
+            "回调：`https://oa.idays.gq/api/gmail/oauth/callback`",
+        ]),
+        ("Search Console 域名验证", [
+            "验证地址：`https://oa.idays.gq/google883877c5c8e86eea.html`",
+        ]),
+        ("重装后操作", [
+            "1. Pub/Sub 订阅无需重建",
+            "2. 域名验证永久有效",
+            "3. 点 Gmail Push 授权链接重新授权各账号",
+            "4. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息",
+        ]),
+    ])
+
+    outlook_guide = _make_guide("Outlook Push 配置备忘", [
+        ("Azure 应用注册", [
+            "地址：`portal.azure.com`",
+            "应用名：`imail`",
+            "应用 ID：`2e6ee5ed-2fb6-454c-8e1b-a5515b78571b`",
+        ]),
+        ("重定向 URI", [
+            "类型：移动和桌面应用程序",
+            "地址：`https://oa.idays.gq/api/emails/oauth/outlook/callback`",
+        ]),
+        ("API 权限", [
+            "`Mail.Read` / `Mail.ReadWrite` / `User.Read` / `offline_access`",
+            "允许公共客户端流：已启用",
+        ]),
+        ("Change Notifications 端点", [
+            "`https://oa.idays.gq/api/outlook/push`",
+            "订阅有效期：3 天，程序自动续期",
+        ]),
+        ("重装后操作", [
+            "1. 点 Outlook Push 授权链接重新授权各账号",
+            "2. 授权后自动注册 Change Notifications 订阅",
+            "3. client_secret 到期需去 Azure 重新生成并更新 config",
+        ]),
+    ])
+
     parts.append(gmail_guide)
     parts.append(outlook_guide)
     send_tg(f"✅ 监控已启动，共 {len(accounts)} 个账号\n\n" + "\n\n".join(parts))
