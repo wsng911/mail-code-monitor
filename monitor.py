@@ -1098,10 +1098,10 @@ def main():
             "验证地址：`https://oa.idays.gq/google883877c5c8e86eea.html`",
         ]),
         ("重装后操作", [
-            "1\\. Pub/Sub 订阅无需重建",
-            "2\\. 域名验证永久有效",
-            "3\\. 点 Gmail Push 授权链接重新授权各账号",
-            "4\\. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息",
+            "1. Pub/Sub 订阅无需重建",
+            "2. 域名验证永久有效",
+            "3. 点 Gmail Push 授权链接重新授权各账号",
+            "4. 如积压旧消息：Pub/Sub → 订阅 → 完全清除消息",
         ]),
     ]))
 
@@ -1124,9 +1124,9 @@ def main():
             "订阅有效期：3 天，程序自动续期",
         ]),
         ("重装后操作", [
-            "1\\. 点 Outlook Push 授权链接重新授权各账号",
-            "2\\. 授权后自动注册 Change Notifications 订阅",
-            "3\\. client\\_secret 到期需去 Azure 重新生成并更新 config",
+            "1. 点 Outlook Push 授权链接重新授权各账号",
+            "2. 授权后自动注册 Change Notifications 订阅",
+            "3. client_secret 到期需去 Azure 重新生成并更新 config",
         ]),
     ]))
 
