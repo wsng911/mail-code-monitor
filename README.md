@@ -1,8 +1,12 @@
-# mail-code-monitor
+# Mail-Monitor
 
 监控 Gmail / QQ邮箱 / Outlook 收件箱，收到验证码自动推送 Telegram，支持转发完整邮件（HTML附件）。
 
-Docker Hub: [wsng911/mail-code-monitor](https://hub.docker.com/r/wsng911/mail-code-monitor)
+- Gmail — 应用密码 IMAP 轮询 + OAuth Push（Pub/Sub 实时）
+- QQ邮箱 — IMAP IDLE 长连接（实时）
+- Outlook/Hotmail — OAuth2 Graph API + Change Notifications Push（实时）
+
+Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor)
 
 ---
 
@@ -10,11 +14,7 @@ Docker Hub: [wsng911/mail-code-monitor](https://hub.docker.com/r/wsng911/mail-co
 
 ```bash
 mkdir -p /home/mail-monitor/config && cd /home/mail-monitor
-
-# 编辑配置文件
-nano config/config.yaml
-
-# 启动
+nano config/config.yaml   # 填写配置
 docker compose up -d
 docker compose logs -f
 ```
@@ -24,9 +24,13 @@ docker compose logs -f
 ```yaml
 services:
   mail-monitor:
-    image: wsng911/mail-code-monitor:v1.11
+    image: wsng911/mail-monitor:v1
     container_name: mail-monitor
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    ports:
+      - "8080:8080"     # Outlook OAuth 回调端口
     volumes:
       - ./config:/config
 ```
@@ -40,25 +44,42 @@ telegram:
   bot_token: "your_bot_token"
   chat_id: "your_chat_id"
 
-poll_interval: 30       # 轮询间隔（秒）
+poll_interval: 30       # 轮询间隔（秒），Push 账号不受此影响
 forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
+
+# Outlook OAuth 回调服务（用于一键授权 + Change Notifications Push）
+oauth:
+  enabled: true
+  client_id: "your_azure_client_id"
+  client_secret: "your_azure_client_secret"   # 公共客户端留空
+  redirect_uri: "https://your-domain.com/api/emails/oauth/outlook/callback"
+  port: 8080
+
+# Gmail Push 配置（可选，不填则使用 IMAP 轮询）
+gmail_push:
+  client_id: ""
+  client_secret: ""
+  pubsub_topic: ""
 
 accounts:
   - type: gmail
-    label: 我的Gmail
-    email: you@gmail.com
-    app_pass: "xxxx xxxx xxxx xxxx"
+    mailboxes:
+      - label: 我的Gmail
+        email: you@gmail.com
+        app_pass: "xxxx xxxx xxxx xxxx"
 
   - type: qq
-    label: 我的QQ邮箱
-    email: 123456@qq.com
-    app_pass: "xxxxxxxxxxxxxxxx"
+    mailboxes:
+      - label: 我的QQ邮箱
+        email: 123456@qq.com
+        app_pass: "xxxxxxxxxxxxxxxx"
 
   - type: outlook
-    label: 我的Outlook
-    email: you@hotmail.com
-    refresh_token: "0.AXXX..."
-    client_id: ""         # 留空使用内置默认值
+    mailboxes:
+      - label: 我的Outlook
+        email: you@hotmail.com
+        refresh_token: "0.AXXX..."
+        client_id: ""   # 留空使用内置默认值
 ```
 
 ---
@@ -83,62 +104,51 @@ https://api.telegram.org/bot<你的bot_token>/getUpdates
 > 需要开启两步验证才能使用应用专用密码
 
 **第一步：开启 Gmail IMAP**
-
-1. 打开 [Gmail 设置](https://mail.google.com) → 右上角齿轮 → 查看所有设置
-2. 选择「转发和 POP/IMAP」标签
-3. 「IMAP 访问」→ 启用 IMAP → 保存
+1. 打开 Gmail → 右上角齿轮 → 查看所有设置
+2. 选择「转发和 POP/IMAP」标签 → 启用 IMAP → 保存
 
 **第二步：生成应用专用密码**
-
-1. 打开 [Google 账号安全设置](https://myaccount.google.com/security)
+1. 打开 [Google 账号安全设置](https://myaccount.google.com/apppasswords)
 2. 确认已开启「两步验证」
-3. 搜索「应用专用密码」或访问：https://myaccount.google.com/apppasswords
-4. 选择应用「邮件」→ 生成
-5. 复制 16 位密码（格式如 `xxxx xxxx xxxx xxxx`）
-
-**填入配置：**
+3. 选择应用「邮件」→ 生成，复制 16 位密码
 
 ```yaml
 - type: gmail
-  label: 我的Gmail
-  email: you@gmail.com
-  app_pass: "xxxx xxxx xxxx xxxx"   # 16位应用专用密码
+  mailboxes:
+    - label: 我的Gmail
+      email: you@gmail.com
+      app_pass: "xxxx xxxx xxxx xxxx"
 ```
 
 ---
 
-## QQ邮箱 配置（授权码 + IMAP）
+## QQ邮箱 配置（授权码 + IMAP IDLE）
 
 **第一步：开启 IMAP 服务**
-
-1. 登录 [QQ邮箱](https://mail.qq.com)
-2. 顶部「设置」→「账户」
-3. 找到「POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务」
-4. 开启「IMAP/SMTP服务」→ 按提示用手机发短信验证
+1. 登录 [QQ邮箱](https://mail.qq.com) → 设置 → 账户
+2. 开启「IMAP/SMTP服务」→ 手机短信验证
 
 **第二步：获取授权码**
-
-1. 开启服务后会弹出授权码（16位字母）
-2. 如需重新获取：「账户」页面 → 「生成授权码」
-
-**填入配置：**
+1. 开启服务后弹出授权码（16位字母）
+2. 如需重新获取：账户页面 → 生成授权码
 
 ```yaml
 - type: qq
-  label: 我的QQ邮箱
-  email: 123456@qq.com
-  app_pass: "xxxxxxxxxxxxxxxx"   # 16位授权码
+  mailboxes:
+    - label: 我的QQ邮箱
+      email: 123456@qq.com
+      app_pass: "xxxxxxxxxxxxxxxx"
 ```
+
+> QQ邮箱使用 IMAP IDLE 长连接，新邮件实时推送，无需轮询。
 
 ---
 
-## Outlook / Hotmail 配置（OAuth2 refresh_token）
+## Outlook / Hotmail 配置
 
-使用内置公共 `client_id`，无需注册 Azure 应用。
+### 方案一：内置公共 client_id（简单，无需 Azure）
 
 **第一步：浏览器打开授权链接**
-
-复制以下链接到浏览器，登录你的 Outlook/Hotmail 账号并授权：
 
 ```
 https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=7feada80-d946-4d06-b134-73afa3524fb7&response_type=code&redirect_uri=http://localhost&scope=https://graph.microsoft.com/Mail.Read%20offline_access&prompt=consent
@@ -146,11 +156,11 @@ https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=7feada8
 
 **第二步：获取 code**
 
-授权后浏览器会跳转到类似：
+授权后浏览器跳转到：
 ```
 http://localhost/?code=M.C507_BAY...&session_state=xxx
 ```
-复制 `code=` 后面的完整字符串（到 `&` 为止）。
+复制 `code=` 后面的值（到 `&` 为止）。
 
 **第三步：换取 refresh_token**
 
@@ -163,34 +173,121 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
   -d "scope=https://graph.microsoft.com/Mail.Read offline_access"
 ```
 
-响应示例：
-```json
-{
-  "access_token": "...",
-  "refresh_token": "0.AXXX...",
-  ...
-}
-```
-
-复制 `refresh_token` 的值。
-
-**填入配置：**
+复制响应中的 `refresh_token`。
 
 ```yaml
 - type: outlook
-  label: 我的Outlook
-  email: you@hotmail.com
-  refresh_token: "0.AXXX..."
-  client_id: ""    # 留空即可
+  mailboxes:
+    - label: 我的Outlook
+      email: you@hotmail.com
+      refresh_token: "0.AXXX..."
+      client_id: ""
 ```
-
-> refresh_token 有效期约 90 天，到期后需重新授权。程序运行期间会自动续期。
 
 ---
 
-## 推送格式说明
+### 方案二：自建 Azure 应用 + Change Notifications Push（实时推送）
 
-**有验证码的邮件：**
+> 支持实时收信，无需轮询，推荐多账号场景使用。
+
+#### 1. 注册 Azure 应用
+
+1. 打开 [Azure 门户](https://portal.azure.com) → 搜索「应用注册」→ 新注册
+2. 名称随意，受支持的账户类型选「任何组织目录中的账户和个人 Microsoft 账户」
+3. 重定向 URI 类型选「移动和桌面应用程序」，填入：
+   ```
+   https://your-domain.com/api/emails/oauth/outlook/callback
+   ```
+4. 注册完成后记录「应用程序(客户端) ID」
+
+#### 2. 配置 API 权限
+
+1. 左侧「API 权限」→ 添加权限 → Microsoft Graph → 委托的权限
+2. 添加：`Mail.Read`、`Mail.ReadWrite`、`User.Read`、`offline_access`
+3. 点击「代表xxx授予管理员同意」
+
+#### 3. 允许公共客户端流（无 client_secret 方案）
+
+1. 左侧「身份验证」→ 高级设置
+2. 「允许公共客户端流」→ 开启
+
+#### 4. 填写配置
+
+```yaml
+oauth:
+  enabled: true
+  client_id: "你的应用ID"
+  client_secret: ""   # 公共客户端留空
+  redirect_uri: "https://your-domain.com/api/emails/oauth/outlook/callback"
+  port: 8080
+```
+
+#### 5. 授权账号
+
+启动容器后，浏览器访问：
+```
+https://your-domain.com/auth/outlook
+```
+登录 Outlook 账号完成授权，系统自动保存 token 并注册 Change Notifications 订阅。
+
+> Change Notifications 订阅有效期 3 天，程序自动续期，无需手动操作。
+
+---
+
+## Gmail Push 配置（实时推送，可选）
+
+> 使用 Google Cloud Pub/Sub 实现实时推送，替代 IMAP 轮询。
+
+#### 1. 创建 Google Cloud 项目
+
+1. 打开 [Google Cloud Console](https://console.cloud.google.com)
+2. 创建新项目，启用 Gmail API 和 Cloud Pub/Sub API
+
+#### 2. 创建 Pub/Sub Topic
+
+1. 搜索「Pub/Sub」→ 主题 → 创建主题，名称如 `gmail-push`
+2. 添加发布者权限：
+   - 成员：`gmail-api-push@system.gserviceaccount.com`
+   - 角色：`Pub/Sub 发布者`
+
+#### 3. 创建 Pub/Sub 订阅
+
+1. 订阅 → 创建订阅
+2. 类型选「推送」，端点填：
+   ```
+   https://your-domain.com/api/gmail/push
+   ```
+
+#### 4. 创建 OAuth 客户端
+
+1. 「API 和服务」→「凭据」→ 创建 OAuth 客户端 ID
+2. 类型选「Web 应用」，授权重定向 URI 填：
+   ```
+   https://your-domain.com/api/gmail/oauth/callback
+   ```
+
+#### 5. 填写配置
+
+```yaml
+gmail_push:
+  client_id: "your_google_client_id"
+  client_secret: "your_google_client_secret"
+  pubsub_topic: "projects/your-project/topics/gmail-push"
+```
+
+#### 6. 授权账号
+
+启动容器后，浏览器访问：
+```
+https://your-domain.com/auth/gmail
+```
+登录 Gmail 账号完成授权，系统自动注册 Watch 并开始实时推送。
+
+---
+
+## 推送格式
+
+**有验证码：**
 ```
 `821543`
 
@@ -199,17 +296,15 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
 时间: 2026-04-16 10:08
 主题: 验证您的邮箱地址
 ```
-（验证码可直接点击复制）
 
-**forward_all: true 时额外发送 .html 附件**，点开即可查看完整邮件排版和图片。
+**forward_all: true 时额外发送 HTML 附件**，附件顶部包含发件人、收件人、时间等信息，点开即可查看完整邮件。
 
 ---
 
 ## 常见问题
 
 **Q: Gmail 提示登录失败**
-- 确认已开启两步验证
-- 确认使用的是应用专用密码，不是 Gmail 登录密码
+- 确认已开启两步验证并使用应用专用密码（非 Gmail 登录密码）
 - 确认 IMAP 已在 Gmail 设置中开启
 
 **Q: QQ邮箱登录失败**
@@ -217,9 +312,10 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
 - 授权码只显示一次，忘记需重新生成
 
 **Q: Outlook token 刷新失败**
-- refresh_token 已过期，重新执行授权流程获取新的
-- 确认 `email` 字段填写正确
+- refresh_token 已过期（约 90 天），重新执行授权流程
+- 使用自建 Azure 应用时，访问 `/auth/outlook` 重新授权即可
 
-**Q: 验证码重复推送**
-- 正常现象，首次启动会读取未读邮件
-- 重启后已读邮件不会再推送
+**Q: Change Notifications 收不到推送**
+- 确认 `redirect_uri` 域名可从公网访问
+- 确认端口 8080 已在防火墙开放
+- 查看容器日志确认订阅是否注册成功
