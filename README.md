@@ -1,10 +1,14 @@
-# Mail-Monitor
+# Mail-Monitor（纯 IMAP IDLE 版）
 
 监控 Gmail / QQ邮箱 / Outlook 收件箱，收到验证码自动推送 Telegram，支持转发完整邮件（HTML附件）。
 
-全部账号使用 **IMAP IDLE** 长连接，新邮件实时推送，无需轮询。
+| 邮箱 | 连接方式 | 实时 | 认证方式 |
+|------|---------|------|---------|
+| Gmail | IMAP IDLE | ✅ | 应用专用密码 |
+| QQ邮箱 | IMAP IDLE | ✅ | 授权码 |
+| Outlook / Hotmail | IMAP IDLE (XOAUTH2) | ✅ | OAuth2 refresh_token |
 
-Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor)
+Docker Hub: [wsng911/mail-code-monitor](https://hub.docker.com/r/wsng911/mail-code-monitor)
 
 ---
 
