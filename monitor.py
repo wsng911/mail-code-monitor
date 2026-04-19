@@ -94,10 +94,11 @@ def html_to_text(raw: str) -> str:
 def _safe_filename(subject: str, max_len: int = 30) -> str:
     """把主题转成安全的文件名，限制长度避免截断乱码"""
     name = re.sub(r'[\\/:*?"<>|]', '_', subject).strip()
-    # 按字符截断，避免中文截断乱码
     if len(name) > max_len:
         name = name[:max_len].rstrip()
     return name or "邮件"
+
+def _esc(text: str) -> str:
     """MarkdownV2 特殊字符转义"""
     for c in r'\_*[]()~`>#+-=|{}.!':
         text = text.replace(c, f'\\{c}')
