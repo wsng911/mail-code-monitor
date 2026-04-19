@@ -1,36 +1,36 @@
 telegram:
-  bot_token: "your_bot_token_here"
-  chat_id: "your_chat_id_here"
+  bot_token: "your_bot_token"
+  chat_id: "your_chat_id"
 
-poll_interval: 30       # 轮询间隔（秒）
-forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
-
-# OAuth2 回调服务（用于 Outlook 一键授权）
-oauth:
-  enabled: true
-  client_id: "your_azure_client_id"
-  redirect_uri: "https://oa.idays.gq/api/emails/oauth/outlook/callback"
-  port: 8080
+# true = 转发所有邮件（含 HTML 附件）；false = 只推验证码
+forward_all: false
 
 accounts:
+  # ── Gmail（应用专用密码）──────────────────────────────────────────────────
+  # 需要：开启两步验证 + 生成应用专用密码 + 开启 IMAP
+  # 教程：https://myaccount.google.com/apppasswords
   - type: gmail
     mailboxes:
       - label: 我的Gmail
         email: you@gmail.com
-        app_pass: "xxxx xxxx xxxx xxxx"
-      - label: 备用Gmail
-        email: backup@gmail.com
-        app_pass: "xxxx xxxx xxxx xxxx"
+        app_pass: "xxxx xxxx xxxx xxxx"   # 16位应用专用密码
 
+  # ── QQ邮箱（授权码）──────────────────────────────────────────────────────
+  # 需要：开启 IMAP 服务 + 生成授权码
+  # 教程：QQ邮箱 → 设置 → 账户 → 开启 IMAP/SMTP 服务
   - type: qq
     mailboxes:
       - label: 我的QQ邮箱
         email: 123456@qq.com
-        app_pass: "xxxxxxxxxxxxxxxx"
+        app_pass: "xxxxxxxxxxxxxxxx"       # 16位授权码（非QQ密码）
 
+  # ── Outlook / Hotmail（OAuth2 refresh_token）─────────────────────────────
+  # 需要：获取 refresh_token（见下方教程）
+  # client_id 留空使用内置默认值，也可填自己的 Azure 应用 ID
   - type: outlook
     mailboxes:
       - label: 我的Outlook
         email: you@hotmail.com
         refresh_token: "0.AXXX..."
-        client_id: ""
+        client_id: ""         # 留空使用内置值
+        client_secret: ""     # 自建 Azure 应用时填写

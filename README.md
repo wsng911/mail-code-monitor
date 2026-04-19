@@ -2,9 +2,7 @@
 
 监控 Gmail / QQ邮箱 / Outlook 收件箱，收到验证码自动推送 Telegram，支持转发完整邮件（HTML附件）。
 
-- Gmail — 应用密码 IMAP 轮询 + OAuth Push（Pub/Sub 实时）
-- QQ邮箱 — IMAP IDLE 长连接（实时）
-- Outlook/Hotmail — OAuth2 Graph API + Change Notifications Push（实时）
+全部账号使用 **IMAP IDLE** 长连接，新邮件实时推送，无需轮询。
 
 Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor)
 
@@ -14,7 +12,7 @@ Docker Hub: [wsng911/mail-monitor](https://hub.docker.com/r/wsng911/mail-monitor
 
 ```bash
 mkdir -p /home/mail-monitor/config && cd /home/mail-monitor
-nano config/config.yaml   # 填写配置
+nano config/config.yaml
 docker compose up -d
 docker compose logs -f
 ```
@@ -29,37 +27,20 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Shanghai
-    ports:
-      - "8080:8080"     # Outlook OAuth 回调端口
     volumes:
       - ./config:/config
 ```
 
 ---
 
-## config.yaml 完整示例
+## config.yaml 示例
 
 ```yaml
 telegram:
   bot_token: "your_bot_token"
   chat_id: "your_chat_id"
 
-poll_interval: 30       # 轮询间隔（秒），Push 账号不受此影响
-forward_all: false      # true = 转发所有邮件+HTML附件；false = 只推验证码
-
-# Outlook OAuth 回调服务（用于一键授权 + Change Notifications Push）
-oauth:
-  enabled: true
-  client_id: "your_azure_client_id"
-  client_secret: "your_azure_client_secret"   # 公共客户端留空
-  redirect_uri: "https://your-domain.com/api/emails/oauth/outlook/callback"
-  port: 8080
-
-# Gmail Push 配置（可选，不填则使用 IMAP 轮询）
-gmail_push:
-  client_id: ""
-  client_secret: ""
-  pubsub_topic: ""
+forward_all: false   # true = 转发所有邮件+HTML附件；false = 只推验证码
 
 accounts:
   - type: gmail
@@ -79,7 +60,7 @@ accounts:
       - label: 我的Outlook
         email: you@hotmail.com
         refresh_token: "0.AXXX..."
-        client_id: ""   # 留空使用内置默认值
+        client_id: ""
 ```
 
 ---
@@ -99,18 +80,18 @@ https://api.telegram.org/bot<你的bot_token>/getUpdates
 
 ---
 
-## Gmail 配置（应用专用密码 + IMAP）
+## Gmail 配置
 
 > 需要开启两步验证才能使用应用专用密码
 
-**第一步：开启 Gmail IMAP**
+**第一步：开启 IMAP**
 1. 打开 Gmail → 右上角齿轮 → 查看所有设置
-2. 选择「转发和 POP/IMAP」标签 → 启用 IMAP → 保存
+2. 「转发和 POP/IMAP」→ 启用 IMAP → 保存
 
 **第二步：生成应用专用密码**
-1. 打开 [Google 账号安全设置](https://myaccount.google.com/apppasswords)
-2. 确认已开启「两步验证」
-3. 选择应用「邮件」→ 生成，复制 16 位密码
+1. 打开 [应用专用密码页面](https://myaccount.google.com/apppasswords)
+2. 确认已开启两步验证
+3. 选择「邮件」→ 生成，复制 16 位密码
 
 ```yaml
 - type: gmail
@@ -122,11 +103,11 @@ https://api.telegram.org/bot<你的bot_token>/getUpdates
 
 ---
 
-## QQ邮箱 配置（授权码 + IMAP IDLE）
+## QQ邮箱 配置
 
 **第一步：开启 IMAP 服务**
 1. 登录 [QQ邮箱](https://mail.qq.com) → 设置 → 账户
-2. 开启「IMAP/SMTP服务」→ 手机短信验证
+2. 找到「IMAP/SMTP服务」→ 开启 → 手机短信验证
 
 **第二步：获取授权码**
 1. 开启服务后弹出授权码（16位字母）
@@ -137,30 +118,30 @@ https://api.telegram.org/bot<你的bot_token>/getUpdates
   mailboxes:
     - label: 我的QQ邮箱
       email: 123456@qq.com
-      app_pass: "xxxxxxxxxxxxxxxx"
+      app_pass: "xxxxxxxxxxxxxxxx"   # 授权码，非QQ密码
 ```
-
-> QQ邮箱使用 IMAP IDLE 长连接，新邮件实时推送，无需轮询。
 
 ---
 
 ## Outlook / Hotmail 配置
 
-### 方案一：内置公共 client_id（简单，无需 Azure）
+微软已关闭基本认证，必须使用 OAuth2 `refresh_token` 连接 IMAP。
+
+### 获取 refresh_token（一次性操作）
 
 **第一步：浏览器打开授权链接**
 
 ```
-https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=7feada80-d946-4d06-b134-73afa3524fb7&response_type=code&redirect_uri=http://localhost&scope=https://graph.microsoft.com/Mail.Read%20offline_access&prompt=consent
+https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=7feada80-d946-4d06-b134-73afa3524fb7&response_type=code&redirect_uri=http://localhost&scope=https://outlook.office.com/IMAP.AccessAsUser.All%20offline_access&prompt=consent
 ```
 
 **第二步：获取 code**
 
-授权后浏览器跳转到：
+授权后浏览器跳转到（页面无法打开是正常的）：
 ```
 http://localhost/?code=M.C507_BAY...&session_state=xxx
 ```
-复制 `code=` 后面的值（到 `&` 为止）。
+复制 `code=` 后面的值（到 `&session_state` 为止）。
 
 **第三步：换取 refresh_token**
 
@@ -170,10 +151,12 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
   -d "grant_type=authorization_code" \
   -d "code=你的code" \
   -d "redirect_uri=http://localhost" \
-  -d "scope=https://graph.microsoft.com/Mail.Read offline_access"
+  -d "scope=https://outlook.office.com/IMAP.AccessAsUser.All offline_access"
 ```
 
-复制响应中的 `refresh_token`。
+复制响应中的 `refresh_token` 值。
+
+**填入配置：**
 
 ```yaml
 - type: outlook
@@ -181,107 +164,21 @@ curl -X POST https://login.microsoftonline.com/common/oauth2/v2.0/token \
     - label: 我的Outlook
       email: you@hotmail.com
       refresh_token: "0.AXXX..."
-      client_id: ""
+      client_id: ""       # 留空使用内置默认值
+      client_secret: ""   # 留空
 ```
 
----
+> `refresh_token` 有效期约 90 天，程序运行期间自动续期。到期后重新执行上述步骤获取新的。
 
-### 方案二：自建 Azure 应用 + Change Notifications Push（实时推送）
+### 使用自建 Azure 应用（可选）
 
-> 支持实时收信，无需轮询，推荐多账号场景使用。
+如需使用自己的 Azure 应用：
 
-#### 1. 注册 Azure 应用
-
-1. 打开 [Azure 门户](https://portal.azure.com) → 搜索「应用注册」→ 新注册
-2. 名称随意，受支持的账户类型选「任何组织目录中的账户和个人 Microsoft 账户」
-3. 重定向 URI 类型选「移动和桌面应用程序」，填入：
-   ```
-   https://your-domain.com/api/emails/oauth/outlook/callback
-   ```
-4. 注册完成后记录「应用程序(客户端) ID」
-
-#### 2. 配置 API 权限
-
-1. 左侧「API 权限」→ 添加权限 → Microsoft Graph → 委托的权限
-2. 添加：`Mail.Read`、`Mail.ReadWrite`、`User.Read`、`offline_access`
-3. 点击「代表xxx授予管理员同意」
-
-#### 3. 允许公共客户端流（无 client_secret 方案）
-
-1. 左侧「身份验证」→ 高级设置
-2. 「允许公共客户端流」→ 开启
-
-#### 4. 填写配置
-
-```yaml
-oauth:
-  enabled: true
-  client_id: "你的应用ID"
-  client_secret: ""   # 公共客户端留空
-  redirect_uri: "https://your-domain.com/api/emails/oauth/outlook/callback"
-  port: 8080
-```
-
-#### 5. 授权账号
-
-启动容器后，浏览器访问：
-```
-https://your-domain.com/auth/outlook
-```
-登录 Outlook 账号完成授权，系统自动保存 token 并注册 Change Notifications 订阅。
-
-> Change Notifications 订阅有效期 3 天，程序自动续期，无需手动操作。
-
----
-
-## Gmail Push 配置（实时推送，可选）
-
-> 使用 Google Cloud Pub/Sub 实现实时推送，替代 IMAP 轮询。
-
-#### 1. 创建 Google Cloud 项目
-
-1. 打开 [Google Cloud Console](https://console.cloud.google.com)
-2. 创建新项目，启用 Gmail API 和 Cloud Pub/Sub API
-
-#### 2. 创建 Pub/Sub Topic
-
-1. 搜索「Pub/Sub」→ 主题 → 创建主题，名称如 `gmail-push`
-2. 添加发布者权限：
-   - 成员：`gmail-api-push@system.gserviceaccount.com`
-   - 角色：`Pub/Sub 发布者`
-
-#### 3. 创建 Pub/Sub 订阅
-
-1. 订阅 → 创建订阅
-2. 类型选「推送」，端点填：
-   ```
-   https://your-domain.com/api/gmail/push
-   ```
-
-#### 4. 创建 OAuth 客户端
-
-1. 「API 和服务」→「凭据」→ 创建 OAuth 客户端 ID
-2. 类型选「Web 应用」，授权重定向 URI 填：
-   ```
-   https://your-domain.com/api/gmail/oauth/callback
-   ```
-
-#### 5. 填写配置
-
-```yaml
-gmail_push:
-  client_id: "your_google_client_id"
-  client_secret: "your_google_client_secret"
-  pubsub_topic: "projects/your-project/topics/gmail-push"
-```
-
-#### 6. 授权账号
-
-启动容器后，浏览器访问：
-```
-https://your-domain.com/auth/gmail
-```
-登录 Gmail 账号完成授权，系统自动注册 Watch 并开始实时推送。
+1. 打开 [Azure 门户](https://portal.azure.com) → 应用注册 → 新注册
+2. 重定向 URI 类型选「移动和桌面应用程序」，填 `http://localhost`
+3. 左侧「API 权限」→ 添加 `IMAP.AccessAsUser.All`、`offline_access`
+4. 左侧「身份验证」→ 允许公共客户端流 → 开启
+5. 将「应用程序(客户端) ID」填入 `client_id`
 
 ---
 
@@ -297,25 +194,25 @@ https://your-domain.com/auth/gmail
 主题: 验证您的邮箱地址
 ```
 
-**forward_all: true 时额外发送 HTML 附件**，附件顶部包含发件人、收件人、时间等信息，点开即可查看完整邮件。
+**`forward_all: true` 时额外发送 HTML 附件**，附件顶部包含发件人、收件人、时间，点开查看完整邮件。
 
 ---
 
 ## 常见问题
 
-**Q: Gmail 提示登录失败**
-- 确认已开启两步验证并使用应用专用密码（非 Gmail 登录密码）
-- 确认 IMAP 已在 Gmail 设置中开启
+**Q: Gmail 登录失败**
+- 使用应用专用密码，不是 Gmail 登录密码
+- 确认 IMAP 已开启，两步验证已启用
 
 **Q: QQ邮箱登录失败**
-- `app_pass` 填的是授权码，不是 QQ 密码
+- `app_pass` 是授权码，不是 QQ 密码
 - 授权码只显示一次，忘记需重新生成
 
 **Q: Outlook token 刷新失败**
-- refresh_token 已过期（约 90 天），重新执行授权流程
-- 使用自建 Azure 应用时，访问 `/auth/outlook` 重新授权即可
+- `refresh_token` 已过期，重新执行授权步骤获取新的
+- 确认 `scope` 包含 `IMAP.AccessAsUser.All`（不是 `Mail.Read`）
 
-**Q: Change Notifications 收不到推送**
-- 确认 `redirect_uri` 域名可从公网访问
-- 确认端口 8080 已在防火墙开放
-- 查看容器日志确认订阅是否注册成功
+**Q: 收不到推送**
+- 查看容器日志：`docker compose logs -f`
+- 确认 `bot_token` 和 `chat_id` 正确
+- 确认已给 bot 发过消息（bot 需要先被用户主动联系才能发消息）
