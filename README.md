@@ -6,7 +6,7 @@
 |------|---------|------|---------|
 | Gmail | IMAP IDLE | ✅ | 应用专用密码 |
 | QQ邮箱 | IMAP IDLE | ✅ | 授权码 |
-| Outlook / Hotmail | IMAP IDLE (XOAUTH2) | ✅ | OAuth2 refresh_token |
+| Outlook | IMAP IDLE (XOAUTH2) | ✅ | OAuth2 refresh_token |
 
 Docker Hub: [wsng911/mail-code-monitor](https://hub.docker.com/r/wsng911/mail-code-monitor)
 
@@ -129,7 +129,7 @@ https://api.telegram.org/bot<你的bot_token>/getUpdates
 
 ---
 
-## Outlook / Hotmail 配置
+## Outlook 配置
 
 微软已关闭基本认证，必须使用 OAuth2 `refresh_token` 连接 IMAP。
 
