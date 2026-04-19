@@ -269,8 +269,16 @@ def idle_worker(acc: dict):
                     break
 
         except Exception as e:
+            err = str(e)
             log.error(f"[IDLE:{label}] 连接断开: {e}")
-            time.sleep(15)
+            if any(kw in err for kw in ("Login fail", "Authentication failed", "AUTHENTICATE")):
+                if not getattr(idle_worker, f"_alerted_{email}", False):
+                    setattr(idle_worker, f"_alerted_{email}", True)
+                    send_tg(f"⚠️ 邮箱账号失效：`{_esc(label)}`\n请检查密码或授权码")
+                time.sleep(3600)
+            else:
+                setattr(idle_worker, f"_alerted_{email}", False)
+                time.sleep(15)
 
 # ── 主入口 ────────────────────────────────────────────────────────────────────
 def main():
