@@ -22,7 +22,7 @@ docker compose logs -f
 ```yaml
 services:
   mail-monitor:
-    image: wsng911/mail-monitor:v1
+    image: wsng911/mail-code-monitor:v1
     container_name: mail-monitor
     restart: unless-stopped
     environment:
@@ -30,6 +30,8 @@ services:
     volumes:
       - ./config:/config
 ```
+
+> `latest` 与 `v1` 为同一镜像，`image: wsng911/mail-code-monitor:latest` 效果相同。
 
 ---
 
